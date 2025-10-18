@@ -1,0 +1,2 @@
+{"timestamp": 1760613742.9402432, "action": "promote", "node_id": "test_node_1", "success": false, "message": "Unauthorized"}
+{"timestamp": 1760613742.9402432, "action": "promote", "node_id": "test_node_1", "success": true, "message": "Success"}

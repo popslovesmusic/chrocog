@@ -1,0 +1,78 @@
+{
+  "timestamp": "2025-10-17T00:19:53.954455",
+  "duration_s": 126.60071349143982,
+  "latency_stats": {
+    "total_samples": 1000,
+    "avg_latency_ms": 3.2860987186431885,
+    "min_latency_ms": 1.0151863098144531,
+    "max_latency_ms": 11.081933975219727,
+    "p50_latency_ms": 3.148794174194336,
+    "p95_latency_ms": 5.373406410217285,
+    "p99_latency_ms": 5.621674060821533,
+    "avg_jitter_ms": 1.547417402267456,
+    "max_jitter_ms": 8.075475692749023,
+    "clock_offset_ms": -1.639101505279541,
+    "total_pings_sent": 1000,
+    "total_pongs_received": 1000,
+    "total_timeouts": 0,
+    "success_rate": 100.0,
+    "meets_sc001": true,
+    "meets_sc003": true
+  },
+  "latency_distribution": {
+    "buckets": [
+      "0-10ms",
+      "10-20ms"
+    ],
+    "counts": [
+      999,
+      1
+    ],
+    "percentages": [
+      99.9,
+      0.1
+    ]
+  },
+  "fps_stats": {
+    "total_frames": 3500,
+    "duration_s": 60.0040602684021,
+    "avg_fps": 58.32938611727724,
+    "avg_frame_time_ms": 17.144017219543457,
+    "min_frame_time_ms": 16.696929931640625,
+    "max_frame_time_ms": 34.624576568603516,
+    "p95_frame_time_ms": 17.42842197418213,
+    "p99_frame_time_ms": 17.700226306915283,
+    "frame_drops": 0,
+    "frame_drop_rate_percent": 0.0
+  },
+  "cpu_stats": {
+    "avg_cpu_percent": 0.2581818181818182,
+    "max_cpu_percent": 14.2,
+    "p95_cpu_percent": 0.0
+  },
+  "gpu_stats": {
+    "avg_gpu_percent": 0.0,
+    "max_gpu_percent": 0.0,
+    "note": "GPU monitoring not implemented (requires GPUtil)"
+  },
+  "memory_stats": {
+    "initial_memory_mb": 39.0234375,
+    "final_memory_mb": 39.02734375,
+    "memory_increase_mb": 0.00390625,
+    "memory_increase_percent": 0.01001001001001001,
+    "avg_memory_mb": 39.02734375,
+    "max_memory_mb": 39.02734375
+  },
+  "scaling_stats": {
+    "avg_fps": 60.0,
+    "min_fps": 60.0,
+    "max_fps": 60.0,
+    "avg_latency_ms": 20.0,
+    "max_latency_ms": 20.0,
+    "avg_cpu_percent": 30.0,
+    "avg_gpu_percent": 40.0,
+    "current_complexity_level": 5,
+    "scale_up_count": 2,
+    "scale_down_count": 2,
+    "total_adjustments": 4,
+    "meets_sc002": 

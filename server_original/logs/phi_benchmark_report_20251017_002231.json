@@ -1,0 +1,101 @@
+{
+  "timestamp": "2025-10-17T00:22:31.800201",
+  "duration_s": 126.68300175666809,
+  "latency_stats": {
+    "total_samples": 1000,
+    "avg_latency_ms": 3.353498935699463,
+    "min_latency_ms": 0.8642673492431641,
+    "max_latency_ms": 21.271705627441406,
+    "p50_latency_ms": 3.316044807434082,
+    "p95_latency_ms": 5.327260494232177,
+    "p99_latency_ms": 5.632727146148682,
+    "avg_jitter_ms": 1.5195677280426025,
+    "max_jitter_ms": 19.5620059967041,
+    "clock_offset_ms": -1.6994762420654297,
+    "total_pings_sent": 1000,
+    "total_pongs_received": 1000,
+    "total_timeouts": 0,
+    "success_rate": 100.0,
+    "meets_sc001": true,
+    "meets_sc003": true
+  },
+  "latency_distribution": {
+    "buckets": [
+      "0-10ms",
+      "10-20ms",
+      "20-30ms"
+    ],
+    "counts": [
+      999,
+      0,
+      1
+    ],
+    "percentages": [
+      99.9,
+      0.0,
+      0.1
+    ]
+  },
+  "fps_stats": {
+    "total_frames": 3501,
+    "duration_s": 60.00979995727539,
+    "avg_fps": 58.340471097930234,
+    "avg_frame_time_ms": 17.14040408370087,
+    "min_frame_time_ms": 16.71004295349121,
+    "max_frame_time_ms": 18.850088119506836,
+    "p95_frame_time_ms": 17.44556427001953,
+    "p99_frame_time_ms": 17.595529556274414,
+    "frame_drops": 0,
+    "frame_drop_rate_percent": 0.0
+  },
+  "cpu_stats": {
+    "avg_cpu_percent": 0.0,
+    "max_cpu_percent": 0.0,
+    "p95_cpu_percent": 0.0
+  },
+  "gpu_stats": {
+    "avg_gpu_percent": 0.0,
+    "max_gpu_percent": 0.0,
+    "note": "GPU monitoring not implemented (requires GPUtil)"
+  },
+  "memory_stats": {
+    "initial_memory_mb": 38.859375,
+    "final_memory_mb": 38.86328125,
+    "memory_increase_mb": 0.00390625,
+    "memory_increase_percent": 0.010052271813429835,
+    "avg_memory_mb": 38.86328125,
+    "max_memory_mb": 38.86328125
+  },
+  "scaling_stats": {
+    "avg_fps": 60.0,
+    "min_fps": 60.0,
+    "max_fps": 60.0,
+    "avg_latency_ms": 20.0,
+    "max_latency_ms": 20.0,
+    "avg_cpu_percent": 30.0,
+    "avg_gpu_percent": 40.0,
+    "current_complexity_level": 5,
+    "scale_up_count": 2,
+    "scale_down_count": 2,
+    "total_adjustments": 4,
+    "meets_sc002": "True",
+    "meets_sc005": true
+  },
+  "success_criteria": {
+    "SC-001 Round-trip latency <= 100ms": true,
+    "SC-002 Frame rate >= 30 fps": true,
+    "SC-003 Interaction delay <= 50ms": true,
+    "SC-004 Memory increase < 5%": true,
+    "SC-005 Auto-scaling response < 0.5s": true,
+    "all_passed": true
+  },
+  "optimal_settings": {
+    "target_fps": 45,
+    "audio_buffer_ms": 10,
+    "visual_complexity_level": 5,
+    "enable_phi_breathing": true,
+    "enable_topology_links": true,
+    "enable_gradients": true,
+    "render_resolution": 1.0
+  }
+}

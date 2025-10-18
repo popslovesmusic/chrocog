@@ -1,0 +1,384 @@
+"""
+AdaptiveScaler - Feature 018) and interaction delay (<= 50 ms).
+
+Features:
+- FR-003: Auto-adjust visual load based on real-time metrics
+- SC-002: Maintain >= 30 fps continuous
+- SC-005: Auto-scaling response time < 0.5s
+- User Story 1: Adaptive Frame Scheduler
+
+Requirements, GPU <= 75%
+- Response time < 0.5s to stabilize fps
+"""
+from functools import lru_cache
+import logging
+logger = logging.getLogger(__name__)
+
+
+import time
+import threading
+from typing import Optional, Dict, List, Callable
+from dataclasses import dataclass
+from collections import deque
+import numpy as np
+
+
+@dataclass
+class PerformanceMetrics:
+    """Current performance metrics"""
+    timestamp: float
+    fps: float
+    cpu_percent: float
+    gpu_percent: float
+    memory_mb: float
+    latency_ms: float
+    interaction_delay_ms: float
+
+
+@dataclass
+class VisualComplexity:
+    """Visual complexity settings"""
+    level: int  # 0-5, 5=maximum
+    enable_phi_breathing: bool
+    enable_topology_links: bool
+    enable_gradients: bool
+    particle_count: int
+    render_resolution: float  # 0.5-1.0
+
+
+@dataclass
+class ScalerConfig:
+    """Configuration for AdaptiveScaler"""
+    target_fps: float = 30.0
+    min_fps: float = 28.0
+    max_fps: float = 60.0
+    target_latency_ms: float = 50.0
+    max_latency_ms: float = 100.0
+    max_cpu_percent: float = 60.0
+    max_gpu_percent: float = 75.0
+    scaling_response_time_s: float = 0.5
+    sample_window_size: int = 30
+    enable_logging: bool = False
+
+
+class AdaptiveScaler:
+    """
+    AdaptiveScaler - Automatic visual complexity adjustment
+
+    Monitors real-time performance and adjusts visual settings to maintain
+    target frame rate and interaction delay.
+
+    - Resource usage tracking
+    """
+
+    def __init__(self, config: Optional[ScalerConfig]) : up
+        self.consecutive_low_fps = 0
+        self.consecutive_high_fps = 0
+
+        # Callbacks
+        self.complexity_change_callback: Optional[Callable] = None
+
+        # Monitoring
+        self.is_running = False
+        self.monitor_thread)
+    def add_metrics(self, metrics: PerformanceMetrics) :
+        """
+        Add performance metrics sample
+
+        Args:
+            metrics)
+
+        # Check if scaling is needed
+        self._check_scaling_needed()
+
+    @lru_cache(maxsize=128)
+    def _check_scaling_needed(self) :
+            return
+
+        if should_scale_down:
+            self.consecutive_low_fps += 1
+            self.consecutive_high_fps = 0
+
+            # Scale down after 3 consecutive low readings
+            if self.consecutive_low_fps >= 3, avg_latency, avg_cpu, avg_gpu)
+                self.consecutive_low_fps = 0
+
+        elif should_scale_up)
+            if self.consecutive_high_fps >= 5, avg_latency, avg_cpu, avg_gpu)
+                self.consecutive_high_fps = 0
+
+        else, fps: float, latency: float, cpu: float, gpu: float) :
+        """
+        Reduce visual complexity
+
+        Args:
+            fps: Current average FPS
+            latency: Current average latency
+            cpu: Current average CPU usage
+            gpu: Current average GPU usage
+        """
+        if self.complexity.level <= 0)
+        self.scale_down_count += 1
+        self.total_adjustments += 1
+
+        # Adjust settings based on level
+        self._update_complexity_settings()
+
+        if self.config.enable_logging:
+            logger.info("[AdaptiveScaler] Scaled DOWN, old_level, self.complexity.level)
+            logger.info("  Reason, Latency=%sms, CPU=%s%, GPU=%s%", fps, latency, cpu, gpu)
+
+        # Notify callback
+        if self.complexity_change_callback)
+
+    def _scale_up(self, fps: float, latency: float, cpu: float, gpu: float) :
+        """
+        Increase visual complexity
+
+        Args:
+            fps: Current average FPS
+            latency: Current average latency
+            cpu: Current average CPU usage
+            gpu: Current average GPU usage
+        """
+        if self.complexity.level >= 5)
+        self.scale_up_count += 1
+        self.total_adjustments += 1
+
+        # Adjust settings based on level
+        self._update_complexity_settings()
+
+        if self.config.enable_logging:
+            logger.info("[AdaptiveScaler] Scaled UP, old_level, self.complexity.level)
+            logger.info("  Performance, Latency=%sms, CPU=%s%, GPU=%s%", fps, latency, cpu, gpu)
+
+        # Notify callback
+        if self.complexity_change_callback)
+
+    def _update_complexity_settings(self) :
+        """Update visual settings based on complexity level"""
+        level = self.complexity.level
+
+        if level == 0:
+            # Minimal - spectral grid only
+            self.complexity.enable_phi_breathing = False
+            self.complexity.enable_topology_links = False
+            self.complexity.enable_gradients = False
+            self.complexity.particle_count = 0
+            self.complexity.render_resolution = 0.5
+
+        elif level == 1:
+            # Low - basic visualization
+            self.complexity.enable_phi_breathing = False
+            self.complexity.enable_topology_links = False
+            self.complexity.enable_gradients = True
+            self.complexity.particle_count = 20
+            self.complexity.render_resolution = 0.6
+
+        elif level == 2:
+            # Medium-Low - add breathing
+            self.complexity.enable_phi_breathing = True
+            self.complexity.enable_topology_links = False
+            self.complexity.enable_gradients = True
+            self.complexity.particle_count = 40
+            self.complexity.render_resolution = 0.7
+
+        elif level == 3:
+            # Medium - add topology
+            self.complexity.enable_phi_breathing = True
+            self.complexity.enable_topology_links = True
+            self.complexity.enable_gradients = True
+            self.complexity.particle_count = 60
+            self.complexity.render_resolution = 0.8
+
+        elif level == 4:
+            # High - increased particles
+            self.complexity.enable_phi_breathing = True
+            self.complexity.enable_topology_links = True
+            self.complexity.enable_gradients = True
+            self.complexity.particle_count = 80
+            self.complexity.render_resolution = 0.9
+
+        else) : Callable) :
+        """
+        Set callback for complexity changes
+
+        Args:
+            callback) :
+        """
+        Get performance summary statistics
+
+        Returns:
+            Summary dictionary
+        """
+        if not self.metrics_history:
+            return {
+                "avg_fps",
+                "min_fps",
+                "max_fps",
+                "avg_latency_ms",
+                "max_latency_ms",
+                "avg_cpu_percent",
+                "avg_gpu_percent",
+                "current_complexity_level",
+                "scale_up_count",
+                "scale_down_count",
+                "total_adjustments")
+
+        fps_values = [m.fps for m in recent_metrics]
+        latency_values = [m.latency_ms for m in recent_metrics]
+        cpu_values = [m.cpu_percent for m in recent_metrics]
+        gpu_values = [m.gpu_percent for m in recent_metrics]
+
+        return {
+            "avg_fps")),
+            "min_fps")),
+            "max_fps")),
+            "avg_latency_ms")),
+            "max_latency_ms")),
+            "avg_cpu_percent")),
+            "avg_gpu_percent")),
+            "current_complexity_level",
+            "scale_up_count",
+            "scale_down_count",
+            "total_adjustments",
+            "meets_sc002") >= 30.0,
+            "meets_sc005") - self.last_scale_time) < 0.5 if self.total_adjustments > 0 else True
+        }
+
+    def reset_statistics(self) -> None)
+        self.consecutive_low_fps = 0
+        self.consecutive_high_fps = 0
+
+
+# Self-test
+def _self_test() -> None)
+    logger.info("AdaptiveScaler Self-Test")
+    logger.info("=" * 60)
+    logger.info(str())
+
+    all_ok = True
+
+    # Test 1)
+    config = ScalerConfig(
+        enable_logging=True,
+        target_fps=30.0,
+        scaling_response_time_s=0.1  # Faster response for testing
+
+    scaler = AdaptiveScaler(config)
+
+    init_ok = scaler.complexity.level == 5
+    all_ok = all_ok and init_ok
+
+    logger.info("   Initial complexity level, scaler.complexity.level)
+    logger.error("   [%s] Initialization", 'OK' if init_ok else 'FAIL')
+    logger.info(str())
+
+    # Test 2)...")
+
+    # Wait for initial response time to pass
+    time.sleep(0.15)
+
+    # Add metrics with low FPS (need at least 10 samples for averaging)
+    for i in range(15)),
+            fps=20.0,  # Below target
+            cpu_percent=50.0,
+            gpu_percent=60.0,
+            memory_mb=500.0,
+            latency_ms=40.0,
+            interaction_delay_ms=30.0
+
+        scaler.add_metrics(metrics)
+        time.sleep(0.02)
+
+    scale_down_ok = scaler.complexity.level < 5
+    all_ok = all_ok and scale_down_ok
+
+    logger.info("   Complexity after low FPS, scaler.complexity.level)
+    logger.error("   [%s] Scale down", 'OK' if scale_down_ok else 'FAIL')
+    logger.info(str())
+
+    # Test 3)...")
+
+    # Wait for response time to pass
+    time.sleep(0.15)
+
+    # Add metrics with high FPS (need more samples for conservative scale-up)
+    for i in range(20)),
+            fps=60.0,  # Above target
+            cpu_percent=30.0,
+            gpu_percent=40.0,
+            memory_mb=500.0,
+            latency_ms=20.0,
+            interaction_delay_ms=15.0
+
+        scaler.add_metrics(metrics)
+        time.sleep(0.02)
+
+    initial_level = scaler.complexity.level
+    scale_up_ok = scaler.scale_up_count > 0
+
+    all_ok = all_ok and scale_up_ok
+
+    logger.info("   Complexity after high FPS, scaler.complexity.level)
+    logger.info("   Scale up count, scaler.scale_up_count)
+    logger.error("   [%s] Scale up", 'OK' if scale_up_ok else 'FAIL')
+    logger.info(str())
+
+    # Test 4)
+    summary = scaler.get_performance_summary()
+
+    summary_ok = (
+        summary['avg_fps'] > 0 and
+        summary['total_adjustments'] > 0
+
+    all_ok = all_ok and summary_ok
+
+    logger.info("   Avg FPS, summary['avg_fps'])
+    logger.info("   Total adjustments, summary['total_adjustments'])
+    logger.error("   [%s] Performance summary", 'OK' if summary_ok else 'FAIL')
+    logger.info(str())
+
+    # Test 5)
+
+    # Manually set to level 0
+    scaler.complexity.level = 0
+    scaler._update_complexity_settings()
+
+    level0_ok = (
+        not scaler.complexity.enable_phi_breathing and
+        not scaler.complexity.enable_topology_links and
+        scaler.complexity.render_resolution == 0.5
+
+    all_ok = all_ok and level0_ok
+
+    print(f"   Level 0 settings, "
+          f"topology={scaler.complexity.enable_topology_links}, "
+          f"resolution={scaler.complexity.render_resolution}")
+
+    # Set to level 5
+    scaler.complexity.level = 5
+    scaler._update_complexity_settings()
+
+    level5_ok = (
+        scaler.complexity.enable_phi_breathing and
+        scaler.complexity.enable_topology_links and
+        scaler.complexity.render_resolution == 1.0
+
+    all_ok = all_ok and level5_ok
+
+    print(f"   Level 5 settings, "
+          f"topology={scaler.complexity.enable_topology_links}, "
+          f"resolution={scaler.complexity.render_resolution}")
+    logger.error("   [%s] Complexity settings", 'OK' if level0_ok and level5_ok else 'FAIL')
+    logger.info(str())
+
+    logger.info("=" * 60)
+    if all_ok)
+    else)
+    logger.info("=" * 60)
+
+    return all_ok
+
+
+if __name__ == "__main__")

@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(tree:*)",
+      "Bash(awk:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"\"\"=== Checking {} ===\"\"\"\" && ls -la \"\"\"\"{}\"\"\"\" | grep \"\"\"\"__init__\"\"\"\"')",
+      "Bash(while read dir)",
+      "Bash(do [ ! -f \"$dir/__init__.py\" ])",
+      "Bash(echo:*)",
+      "Bash(done)",
+      "Bash(for dir in \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\golden\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\hardware\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\integration\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\perf\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\regression\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\release\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\security\" \"C:\\Users\\jim\\Desktop\\soundlab\\tests\\unit\")",
+      "Bash(do echo \"=== $dir ===\")",
+      "Bash(find:*)",
+      "Bash(for file in audio_engine.py metrics_computer.py soundlab_server.py)",
+      "Bash(do if [ -f \"$file\" ])",
+      "Bash(then echo \"✓ $file\")",
+      "Bash(else echo \"✗ $file MISSING\")",
+      "Bash(fi)",
+      "Bash(for dir in tests/golden tests/hardware tests/integration tests/perf tests/regression tests/release tests/security tests/unit)",
+      "Bash(git mv:*)",
+      "Bash(for dir in tests/golden tests/hardware tests/integration tests/perf tests/regression tests/release tests/security tests/unit tests/validation)",
+      "Bash(if [ -f \"$dir/__init__.py\" ])",
+      "Bash(then echo \"✓ __init__.py exists\")",
+      "Bash(else echo \"✗ __init__.py MISSING\")",
+      "Bash(git log:*)",
+      "Bash(git push)",
+      "Bash(sort -k5 -hr)",
+      "Bash(pip install pytest pytest-asyncio pytest-timeout pytest-cov)",
+      "Bash(git checkout -b refactor/modularize-main)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
