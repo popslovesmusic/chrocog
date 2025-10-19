@@ -15,6 +15,11 @@ Run with: python main.py
 import asyncio
 import signal
 import sys
+from .ab_snapshot import _self_test
+
+if not _self_test():
+    raise RuntimeError("ABSnapshot self-test failed at startup!")
+
 from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,6 +54,34 @@ from .session_comparator import SessionComparator, SessionStats, ComparisonResul
 from .correlation_analyzer import CorrelationAnalyzer, CorrelationMatrix
 from .chromatic_visualizer import ChromaticVisualizer, VisualizerConfig
 from .state_sync_manager import StateSyncManager, SyncConfig
+
+# ================================================================
+# Initialize FastAPI Application
+# ================================================================
+
+app = FastAPI(title="Soundlab Main Server", version="1.0")
+
+# Allow all CORS for testing; restrict later for production
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Optionally serve static content (HTML, logs, presets, etc.)
+static_dir = Path(__file__).parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+# ------------------------------------------------
+# Root Endpoint (for sanity / health check)
+# ------------------------------------------------
+@app.get("/")
+async def root():
+    return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
 
 
 class SoundlabServer:
