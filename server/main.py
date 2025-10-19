@@ -57,7 +57,7 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 import uvicorn
 import os
@@ -72,12 +72,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -------------------------------------------------
-# Root & Engine Status Routes
-# -------------------------------------------------
-@app.get("/")
-async def root():
+ROOT_DIR = Path(__file__).resolve().parent.parent
+UI_ENTRY = ROOT_DIR / "soundlab_v2.html"
+PARTIALS_DIR = ROOT_DIR / "partials"
+CSS_DIR = ROOT_DIR / "css"
+JS_DIR = ROOT_DIR / "js"
+STATIC_DIR = ROOT_DIR / "static"
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_root_ui():
+    if UI_ENTRY.exists():
+        return FileResponse(UI_ENTRY)
+    return HTMLResponse("<h1>Soundlab UI not found</h1>", status_code=404)
+
+
+@app.get("/ui", response_class=HTMLResponse)
+async def serve_ui():
+    return await serve_root_ui()
+
+
+@app.get("/api/status")
+async def api_status():
     return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
+
 
 @app.get("/engine/status")
 async def engine_status():
@@ -85,10 +106,36 @@ async def engine_status():
         import dase_engine
         return {
             "version": getattr(dase_engine, "__version__", "unknown"),
-            "cpu": "AVX2/FMA supported"
+            "cpu": "AVX2/FMA supported",
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/partials/{filename}", response_class=HTMLResponse)
+async def serve_partial(filename: str):
+    path = PARTIALS_DIR / filename
+    if path.exists():
+        return FileResponse(path)
+    return HTMLResponse(f"<h3>Partial not found: {filename}</h3>", status_code=404)
+
+
+# Serve CSS files
+@app.get("/css/{filename}")
+async def serve_css(filename: str):
+    path = CSS_DIR / filename
+    if path.exists():
+        return FileResponse(path)
+    return {"error": f"CSS not found: {filename}"}
+
+
+# Serve JS files
+@app.get("/js/{filename}")
+async def serve_js(filename: str):
+    path = JS_DIR / filename
+    if path.exists():
+        return FileResponse(path)
+    return {"error": f"JS not found: {filename}"}
 
 
 # Import all components
@@ -118,169 +165,6 @@ from .chromatic_visualizer import ChromaticVisualizer, VisualizerConfig
 from .state_sync_manager import StateSyncManager, SyncConfig
 print(f"🧭 Loaded main.py from: {__file__}")
 
-
-# ================================================================
-# D-ASE Engine Auto-Loader
-# ================================================================
-try:
-    from importlib import import_module
-    from pathlib import Path
-    import sys
-
-    dase_path = Path(__file__).resolve().parent.parent / "sase_amp_fixed"
-    if dase_path.exists() and str(dase_path) not in sys.path:
-        sys.path.insert(0, str(dase_path))
-
-    dase_engine = import_module("dase_engine")
-    print(f"D-ASE engine v{getattr(dase_engine, '__version__', 'unknown')} initialized successfully.")
-    if hasattr(dase_engine, "print_cpu_capabilities"):
-        dase_engine.print_cpu_capabilities()
-
-except ModuleNotFoundError:
-    print(
-        "Warning: D-ASE engine not available. "
-        "Build with: cd 'C:\\Users\\jim\\Desktop\\Chrocog\\sase_amp_fixed' && python setup.py build_ext --inplace"
-    )
-except Exception as e:
-    import traceback
-    print(f"Error initializing D-ASE engine: {e}")
-    traceback.print_exc()
-
-
-# ================================================================
-# Initialize FastAPI Application  ✅ (must come before routes)
-# ================================================================
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-
-app = FastAPI(title="Soundlab Main Server", version="1.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Optionally serve static content
-from pathlib import Path
-static_dir = Path(__file__).parent.parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
-# ------------------------------------------------
-# Root Endpoint (Health Check)
-# ------------------------------------------------
-@app.get("/")
-async def root():
-    return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
-
-
-
-
-# ================================================================
-# Initialize FastAPI Application
-# ================================================================
-
-app = FastAPI(title="Soundlab Main Server", version="1.0")
-
-# Allow all CORS for testing; restrict later for production
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Optionally serve static content (HTML, logs, presets, etc.)
-static_dir = Path(__file__).parent.parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
-# ------------------------------------------------
-# Root Endpoint (for sanity / health check)
-# ------------------------------------------------
-@app.get("/")
-async def root():
-    return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
-# ------------------------------------------------
-# Serve the Soundlab UI at /ui
-# ------------------------------------------------
-from fastapi.responses import HTMLResponse
-from fastapi import Request
-from pathlib import Path
-
-@app.get("/ui", response_class=HTMLResponse)
-async def serve_ui(request: Request):
-    """
-    Serve the main Soundlab UI (soundlab_v2.html)
-    """
-    ui_path = Path(__file__).resolve().parent.parent / "soundlab_v2.html"
-    if ui_path.exists():
-        return FileResponse(ui_path)
-    return HTMLResponse("<h1>Soundlab UI not found</h1>", status_code=404)
-
-
-# ------------------------------------------------
-# Engine Status Endpoint
-# ------------------------------------------------
-@app.get("/engine/status")
-async def engine_status():
-    try:
-        import dase_engine
-        return {
-            "version": getattr(dase_engine, "__version__", "unknown"),
-            "cpu": "AVX2/FMA supported",
-        }
-    except Exception as e:
-        return {"error": str(e)}
-        # ================================================================
-# Serve Soundlab UI and assets
-# ================================================================
-from fastapi.responses import HTMLResponse
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-UI_ENTRY = ROOT_DIR / "soundlab_v2.html"
-PARTIALS_DIR = ROOT_DIR / "partials"
-CSS_DIR = ROOT_DIR / "css"
-JS_DIR = ROOT_DIR / "js"
-STATIC_DIR = ROOT_DIR / "static"
-
-# Serve the main Soundlab UI
-@app.get("/", response_class=HTMLResponse)
-async def serve_root_ui():
-    if UI_ENTRY.exists():
-        return FileResponse(UI_ENTRY)
-    return HTMLResponse("<h1>Soundlab UI not found</h1>", status_code=404)
-
-# Serve partial HTML components
-@app.get("/partials/{filename}", response_class=HTMLResponse)
-async def serve_partial(filename: str):
-    path = PARTIALS_DIR / filename
-    if path.exists():
-        return FileResponse(path)
-    return HTMLResponse(f"<h3>Partial not found: {filename}</h3>", status_code=404)
-
-# Serve CSS files
-@app.get("/css/{filename}")
-async def serve_css(filename: str):
-    path = CSS_DIR / filename
-    if path.exists():
-        return FileResponse(path)
-    return {"error": f"CSS not found: {filename}"}
-
-# Serve JS files
-@app.get("/js/{filename}")
-async def serve_js(filename: str):
-    path = JS_DIR / filename
-    if path.exists():
-        return FileResponse(path)
-    return {"error": f"JS not found: {filename}"}
 
 # ------------------------------------------------
 # Engine Benchmark Endpoint
