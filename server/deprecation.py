@@ -1,12 +1,10 @@
 """
 Deprecation utilities for Soundlab + D-ASE
-Feature 026 (FR-004),
+Feature 026 (FR-004): API deprecation warnings and tracking
+
+This module provides decorators and utilities for marking APIs as deprecated,
 issuing warnings, and tracking deprecated functionality for eventual removal.
 """
-from functools import lru_cache
-import logging
-logger = logging.getLogger(__name__)
-
 
 import functools
 import warnings
@@ -14,12 +12,23 @@ from typing import Optional, Callable, Any
 
 
 class DeprecationInfo:
-        name,
-        deprecated_in,
-        remove_in,
-        reason,
-        alternative,
+    """Store information about a deprecated item"""
+
+    def __init__(
+        self,
+        name: str,
+        deprecated_in: str,
+        remove_in: str,
+        reason: Optional[str] = None,
+        alternative: Optional[str] = None,
     ):
+        self.name = name
+        self.deprecated_in = deprecated_in
+        self.remove_in = remove_in
+        self.reason = reason
+        self.alternative = alternative
+
+    def __str__(self) -> str:
         msg = f"{self.name} is deprecated since v{self.deprecated_in} and will be removed in v{self.remove_in}."
         if self.reason:
             msg += f" Reason: {self.reason}."
@@ -33,28 +42,39 @@ _DEPRECATION_REGISTRY = {}
 
 
 def deprecated(
-    deprecated_in,
-    remove_in,
-    reason,
-    alternative,
-) :
-        deprecated_in, "1.1.0")
-        remove_in, "2.0.0")
+    deprecated_in: str,
+    remove_in: str,
+    reason: Optional[str] = None,
+    alternative: Optional[str] = None,
+) -> Callable:
+    """
+    Decorator to mark a function, method, or class as deprecated.
+
+    Args:
+        deprecated_in: Version when the item was deprecated (e.g., "1.1.0")
+        remove_in: Version when the item will be removed (e.g., "2.0.0")
         reason: Optional reason for deprecation
         alternative: Optional alternative API to use
 
-    Example,
+    Example:
+        @deprecated(
+            deprecated_in="1.1.0",
             remove_in="2.0.0",
             reason="Replaced by optimized implementation",
             alternative="new_function()"
-
-        def old_function() :
+        )
+        def old_function():
             pass
     """
 
-    def decorator(obj) :
+    def decorator(obj: Any) -> Any:
+        # Determine the name
+        if hasattr(obj, "__name__"):
+            name = obj.__name__
+        elif hasattr(obj, "__class__"):
             name = obj.__class__.__name__
-        else)
+        else:
+            name = str(obj)
 
         # Create deprecation info
         info = DeprecationInfo(
@@ -63,13 +83,49 @@ def deprecated(
             remove_in=remove_in,
             reason=reason,
             alternative=alternative,
+        )
 
         # Register the deprecation
         _DEPRECATION_REGISTRY[name] = info
 
         # If it's a class, wrap its __init__
-        if isinstance(obj, type))
-            def new_init(self, *args, **kwargs) :
+        if isinstance(obj, type):
+            original_init = obj.__init__
+
+            @functools.wraps(original_init)
+            def new_init(self, *args, **kwargs):
+                warnings.warn(
+                    str(info),
+                    category=DeprecationWarning,
+                    stacklevel=2,
+                )
+                return original_init(self, *args, **kwargs)
+
+            obj.__init__ = new_init
+            return obj
+
+        # If it's a function or method, wrap it
+        @functools.wraps(obj)
+        def wrapper(*args, **kwargs):
+            warnings.warn(
+                str(info),
+                category=DeprecationWarning,
+                stacklevel=2,
+            )
+            return obj(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def deprecated_parameter(
+    param_name: str,
+    deprecated_in: str,
+    remove_in: str,
+    reason: Optional[str] = None,
+    alternative: Optional[str] = None,
+) -> Callable:
     """
     Decorator to mark a function parameter as deprecated.
 
@@ -80,20 +136,36 @@ def deprecated(
         reason: Optional reason for deprecation
         alternative: Optional alternative parameter to use
 
-    Example,
+    Example:
+        @deprecated_parameter(
+            "old_param",
             deprecated_in="1.1.0",
             remove_in="2.0.0",
             alternative="new_param"
-
-        def my_function(new_param, old_param) :
+        )
+        def my_function(new_param=None, old_param=None):
             pass
     """
 
-    def decorator(func) :
-            if param_name in kwargs) {info}",
+    def decorator(func: Callable) -> Callable:
+        info = DeprecationInfo(
+            name=f"{func.__name__}.{param_name}",
+            deprecated_in=deprecated_in,
+            remove_in=remove_in,
+            reason=reason,
+            alternative=alternative,
+        )
+
+        _DEPRECATION_REGISTRY[f"{func.__name__}.{param_name}"] = info
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if param_name in kwargs:
+                warnings.warn(
+                    f"Parameter '{param_name}' of {func.__name__}() {info}",
                     category=DeprecationWarning,
                     stacklevel=2,
-
+                )
             return func(*args, **kwargs)
 
         return wrapper
@@ -102,11 +174,11 @@ def deprecated(
 
 
 def deprecated_alias(
-    old_name,
-    new_name,
-    deprecated_in,
-    remove_in,
-) :
+    old_name: str,
+    new_name: str,
+    deprecated_in: str,
+    remove_in: str,
+) -> Callable:
     """
     Create a deprecated alias for a function or class.
 
@@ -119,86 +191,172 @@ def deprecated_alias(
     Returns:
         A wrapped version of the new function that issues a deprecation warning
 
-    Example) :
+    Example:
+        def new_function():
+            pass
+
+        old_function = deprecated_alias(
+            "old_function",
+            "new_function",
+            deprecated_in="1.1.0",
+            remove_in="2.0.0"
+        )(new_function)
+    """
+
+    def decorator(obj: Any) -> Any:
+        info = DeprecationInfo(
+            name=old_name,
+            deprecated_in=deprecated_in,
+            remove_in=remove_in,
+            reason=f"Use {new_name} instead",
+            alternative=new_name,
+        )
+
+        _DEPRECATION_REGISTRY[old_name] = info
+
+        if isinstance(obj, type):
+            # For classes, create a new class that warns on instantiation
+            class DeprecatedClass(obj):
+                def __init__(self, *args, **kwargs):
+                    warnings.warn(
+                        str(info),
+                        category=DeprecationWarning,
+                        stacklevel=2,
+                    )
+                    super().__init__(*args, **kwargs)
+
+            DeprecatedClass.__name__ = old_name
+            return DeprecatedClass
+
+        # For functions
+        @functools.wraps(obj)
+        def wrapper(*args, **kwargs):
+            warnings.warn(
+                str(info),
+                category=DeprecationWarning,
+                stacklevel=2,
+            )
+            return obj(*args, **kwargs)
+
+        wrapper.__name__ = old_name
+        return wrapper
+
+    return decorator
+
+
+def get_deprecations() -> dict:
     """
     Get all registered deprecations.
 
-def get_deprecations_by_version(remove_in) :
+    Returns:
+        Dictionary mapping deprecated item names to DeprecationInfo objects
+    """
+    return _DEPRECATION_REGISTRY.copy()
+
+
+def get_deprecations_by_version(remove_in: str) -> dict:
     """
     Get deprecations scheduled for removal in a specific version.
 
     Args:
-        remove_in, "2.0.0")
+        remove_in: Version to filter by (e.g., "2.0.0")
 
     Returns:
         Dictionary of deprecations scheduled for removal in that version
     """
     return {
-        name, info in _DEPRECATION_REGISTRY.items()
+        name: info
+        for name, info in _DEPRECATION_REGISTRY.items()
         if info.remove_in == remove_in
     }
 
 
-def print_deprecation_report() :
-        if info.remove_in not in by_version)
+def print_deprecation_report():
+    """Print a formatted report of all deprecations."""
+    print("=" * 80)
+    print("Soundlab + D-ASE Deprecation Report")
+    print("=" * 80)
+    print()
 
-    for version in sorted(by_version.keys():
-        logger.info("Scheduled for removal in v%s, version)
-        logger.info("-" * 80)
-        for info in by_version[version], info.name)
-            logger.warning("    Deprecated in, info.deprecated_in)
+    if not _DEPRECATION_REGISTRY:
+        print("No deprecated items.")
+        return
+
+    # Group by removal version
+    by_version = {}
+    for name, info in _DEPRECATION_REGISTRY.items():
+        if info.remove_in not in by_version:
+            by_version[info.remove_in] = []
+        by_version[info.remove_in].append(info)
+
+    for version in sorted(by_version.keys()):
+        print(f"Scheduled for removal in v{version}:")
+        print("-" * 80)
+        for info in by_version[version]:
+            print(f"  • {info.name}")
+            print(f"    Deprecated in: v{info.deprecated_in}")
             if info.reason:
-                logger.info("    Reason, info.reason)
+                print(f"    Reason: {info.reason}")
             if info.alternative:
-                logger.info("    Alternative, info.alternative)
-            logger.info(str())
-        logger.info(str())
+                print(f"    Alternative: {info.alternative}")
+            print()
+        print()
 
 
 # Example usage and tests
 if __name__ == "__main__":
-    # Example 1,
+    # Example 1: Deprecated function
+    @deprecated(
+        deprecated_in="1.1.0",
         remove_in="2.0.0",
         reason="Replaced by optimized implementation",
         alternative="fast_process()",
-
-    @lru_cache(maxsize=128)
-    def slow_process(data) :
+    )
+    def slow_process(data):
         """Old slow processing function."""
         return data
 
-    # Example 2,
+    # Example 2: Deprecated class
+    @deprecated(
+        deprecated_in="1.1.0",
         remove_in="2.0.0",
         reason="Use the new PhiProcessor class",
         alternative="PhiProcessor",
+    )
+    class OldProcessor:
+        """Old processor class."""
 
-    class OldProcessor) :
+        def __init__(self):
             pass
 
-    # Example 3,
+    # Example 3: Deprecated parameter
+    @deprecated_parameter(
+        "old_format",
         deprecated_in="1.1.0",
         remove_in="2.0.0",
         alternative="output_format",
-
-    @lru_cache(maxsize=128)
-    def export_data(data, output_format, old_format) :
+    )
+    def export_data(data, output_format="json", old_format=None):
         """Export data in various formats."""
-        if old_format)
+        if old_format:
+            output_format = old_format
+        return f"Exporting as {output_format}"
+
+    # Print report
+    print_deprecation_report()
 
     # Test the decorators (these will issue warnings)
-    logger.warning("Testing deprecated items (warnings expected))
-    logger.info("-" * 80)
+    print("Testing deprecated items (warnings expected):")
+    print("-" * 80)
 
     # This will warn
     result = slow_process([1, 2, 3])
-    logger.info("Result, result)
+    print(f"Result: {result}")
 
     # This will warn
     processor = OldProcessor()
-    logger.info("Processor, processor)
+    print(f"Processor: {processor}")
 
     # This will warn
     output = export_data([1, 2, 3], old_format="csv")
-    logger.info("Output, output)
-
-"""  # auto-closed missing docstring
+    print(f"Output: {output}")

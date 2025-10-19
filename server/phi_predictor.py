@@ -11,6 +11,8 @@ Features:
 
 Requirements:
 - FR-004: Predictive engine MUST replay and fit session patterns
+- SC-003: Predictive accuracy >= 90% against previous sessions
+"""
 
 import time
 import threading
@@ -27,9 +29,9 @@ from .session_memory import SessionMemory, MetricSnapshot
 class PredictionResult:
     """Result of a prediction"""
     predicted_phi: float          # Predicted Phi value
-    confidence)
+    confidence: float             # Confidence (0-1)
     prediction_time: float        # When prediction was made
-    actual_phi)
+    actual_phi: Optional[float]   # Actual Phi (for validation)
     error: Optional[float]        # Prediction error
 
 
@@ -37,15 +39,17 @@ class PhiPredictor:
     """
     PhiPredictor - Learns patterns and predicts optimal Phi values
 
+    Handles:
+    - Pattern learning from session history (FR-004)
     - Predictive modeling based on metrics
-
+    - Accuracy tracking (SC-003)
     - Auto-reset on divergence
     """
 
     PHI_MIN = 0.618033988749895
     PHI_MAX = 1.618033988749895
 
-    def __init__(self, session_memory: SessionMemory) :
+    def __init__(self, session_memory: SessionMemory):
         """
         Initialize PhiPredictor
 
@@ -60,19 +64,29 @@ class PhiPredictor:
         self.criticality_weight = 0.2
 
         # Prediction tracking
-        self.predictions)
+        self.predictions: List[PredictionResult] = []
+        self.max_predictions = 1000
+        self.lock = threading.Lock()
 
         # Auto-reset threshold
         self.divergence_threshold = 0.20  # 20%
         self.accuracy_window = 50         # Last N predictions for accuracy
 
-    @lru_cache(maxsize=128)
-    def learn_from_session(self) :
+    def learn_from_session(self) -> bool:
+        """
+        Learn patterns from current session data (FR-004)
+
+        Returns:
             True if learning successful
         """
-        try)
+        try:
+            samples = self.session_memory.get_all_samples()
 
-            if len(samples) < 10)
+            if len(samples) < 10:
+                return False
+
+            # Extract metric arrays
+            icis = np.array([s.ici for s in samples])
             coherences = np.array([s.coherence for s in samples])
             criticalities = np.array([s.criticality for s in samples])
             phis = np.array([s.phi_value for s in samples])
@@ -87,11 +101,17 @@ class PhiPredictor:
             unique_ici, unique_indices = np.unique(sorted_ici, return_index=True)
             unique_phi = sorted_phi[unique_indices]
 
-            if len(unique_ici) < 2,
+            if len(unique_ici) < 2:
+                return False
+
+            # Create interpolation model
+            self.ici_to_phi_model = interp1d(
+                unique_ici,
                 unique_phi,
                 kind='linear',
                 bounds_error=False,
                 fill_value=(unique_phi[0], unique_phi[-1])
+            )
 
             # Learn influence weights
             # Higher coherence → prefer higher Phi
@@ -105,10 +125,10 @@ class PhiPredictor:
             return True
 
         except Exception as e:
-            logger.error("[PhiPredictor] Error learning from session, e)
+            print(f"[PhiPredictor] Error learning from session: {e}")
             return False
 
-    def predict_phi(self, ici, coherence, criticality) :
+    def predict_phi(self, ici: float, coherence: float, criticality: float) -> PredictionResult:
         """
         Predict optimal Phi value based on current metrics
 
@@ -120,14 +140,18 @@ class PhiPredictor:
         Returns:
             PredictionResult with prediction
         """
-        with self.lock)
+        with self.lock:
+            current_time = time.time()
 
             # Base prediction from ICI
             if self.ici_to_phi_model is not None:
-                try))
+                try:
+                    base_phi = float(self.ici_to_phi_model(ici))
                 except:
                     base_phi = 1.0  # Fallback to golden ratio
-            else, map deviations to Phi adjustments
+            else:
+                # No model yet - use simple heuristic
+                # ICI target is 0.5, map deviations to Phi adjustments
                 ici_error = ici - 0.5
                 base_phi = 1.0 - ici_error * 0.5  # Inverse relationship
 
@@ -152,19 +176,25 @@ class PhiPredictor:
             # Reduce confidence if metrics are extreme
             if ici < 0.2 or ici > 0.8:
                 confidence *= 0.7
-            if coherence < 0.2,
+            if coherence < 0.2:
+                confidence *= 0.8
+
+            result = PredictionResult(
+                predicted_phi=predicted_phi,
                 confidence=confidence,
                 prediction_time=current_time,
                 actual_phi=None,
                 error=None
+            )
 
             # Store prediction
             self.predictions.append(result)
-            if len(self.predictions) > self.max_predictions)
+            if len(self.predictions) > self.max_predictions:
+                self.predictions.pop(0)
 
             return result
 
-    def update_prediction_accuracy(self, prediction_idx: int, actual_phi: float) :
+    def update_prediction_accuracy(self, prediction_idx: int, actual_phi: float):
         """
         Update prediction with actual value for accuracy tracking
 
@@ -172,71 +202,117 @@ class PhiPredictor:
             prediction_idx: Index of prediction to update
             actual_phi: Actual Phi value that was used
         """
-        with self.lock))
+        with self.lock:
+            if 0 <= prediction_idx < len(self.predictions):
+                pred = self.predictions[prediction_idx]
+                pred.actual_phi = actual_phi
+                pred.error = abs(pred.predicted_phi - actual_phi)
 
-    def get_recent_accuracy(self, window) :
+    def get_recent_accuracy(self, window: Optional[int] = None) -> float:
+        """
+        Calculate recent prediction accuracy (SC-003)
+
+        Args:
             window: Number of recent predictions to consider
 
-        Returns), where 1.0 is perfect
+        Returns:
+            Accuracy (0-1), where 1.0 is perfect
         """
         with self.lock:
             window = window or self.accuracy_window
 
             # Get recent predictions with actual values
-            recent = [p for p in self.predictions[-window) == 0) for p in recent if p.error is not None]
+            recent = [p for p in self.predictions[-window:] if p.actual_phi is not None]
 
-            if len(errors) == 0)
+            if len(recent) == 0:
+                return 0.0
+
+            # Calculate mean absolute percentage error
+            errors = [p.error / (p.actual_phi + 1e-9) for p in recent if p.error is not None]
+
+            if len(errors) == 0:
+                return 0.0
+
+            mape = np.mean(errors)
 
             # Convert to accuracy (1.0 - error)
             accuracy = max(0.0, 1.0 - mape)
 
             return accuracy
 
-    def check_divergence(self) :
+    def check_divergence(self) -> bool:
         """
         Check if predictions are diverging > 20% from actual
+
+        Returns:
+            True if divergence detected
+        """
+        accuracy = self.get_recent_accuracy(window=20)
 
         # Divergence if accuracy < 80% (error > 20%)
         return accuracy < 0.80
 
-    def reset_model(self) :
+    def reset_model(self):
+        """Reset predictive model (auto-reset on divergence)"""
+        with self.lock:
+            self.ici_to_phi_model = None
+            self.coherence_weight = 0.3
+            self.criticality_weight = 0.2
+            print("[PhiPredictor] Model reset due to divergence")
+
+    def get_prediction_stats(self) -> Dict:
         """
         Get prediction statistics
 
         Returns:
             Dictionary with prediction stats
         """
-        with self.lock)
+        with self.lock:
+            total_predictions = len(self.predictions)
             validated_predictions = len([p for p in self.predictions if p.actual_phi is not None])
             recent_accuracy = self.get_recent_accuracy()
 
-            if validated_predictions > 0)
+            if validated_predictions > 0:
+                avg_confidence = np.mean([p.confidence for p in self.predictions if p.actual_phi is not None])
                 avg_error = np.mean([p.error for p in self.predictions if p.error is not None])
             else:
                 avg_confidence = 0.0
                 avg_error = 0.0
 
             return {
-                "total_predictions",
-                "validated_predictions",
-                "recent_accuracy",
-                "avg_confidence",
-                "avg_error",
-                "has_learned_model", target_session) :
+                "total_predictions": total_predictions,
+                "validated_predictions": validated_predictions,
+                "recent_accuracy": recent_accuracy,
+                "avg_confidence": avg_confidence,
+                "avg_error": avg_error,
+                "has_learned_model": self.ici_to_phi_model is not None
+            }
+
+    def replay_session_pattern(self, target_session: SessionMemory) -> Tuple[float, List[float]]:
+        """
+        Replay session pattern and measure accuracy (FR-004, SC-003)
+
+        Args:
             target_session: Session to replay
 
-        Returns, predicted_phis) tuple
+        Returns:
+            (accuracy, predicted_phis) tuple
         """
         samples = target_session.get_all_samples()
 
-        if len(samples) < 10, []
+        if len(samples) < 10:
+            return 0.0, []
 
         predicted_phis = []
         actual_phis = []
 
-        for sample in samples,
+        for sample in samples:
+            # Predict Phi based on metrics
+            prediction = self.predict_phi(
+                ici=sample.ici,
                 coherence=sample.coherence,
                 criticality=sample.criticality
+            )
 
             predicted_phis.append(prediction.predicted_phi)
             actual_phis.append(sample.phi_value)
@@ -253,21 +329,24 @@ class PhiPredictor:
 
 
 # Self-test function
-@lru_cache(maxsize=128)
-def _self_test() -> None)
-    logger.info("PhiPredictor Self-Test")
-    logger.info("=" * 60)
-    logger.info(str())
+def _self_test():
+    """Run basic self-test of PhiPredictor"""
+    print("=" * 60)
+    print("PhiPredictor Self-Test")
+    print("=" * 60)
+    print()
 
     from session_memory import SessionMemory, MetricSnapshot
 
     # Create session with synthetic data
-    logger.info("1. Creating synthetic session...")
+    print("1. Creating synthetic session...")
     memory = SessionMemory(max_samples=200)
     memory.start_session("test_session")
 
     base_time = time.time()
-    for i in range(200))
+    for i in range(200):
+        # Simulate ICI oscillation
+        ici = 0.5 + 0.15 * np.sin(i * 0.05)
 
         # Phi should adapt inversely to ICI
         phi = 1.0 - (ici - 0.5) * 0.3
@@ -281,60 +360,60 @@ def _self_test() -> None)
             phi_phase=i * 0.1,
             phi_depth=0.5,
             active_source="test"
-
+        )
         memory.record_snapshot(snapshot)
 
-    logger.info("   [OK] Created session with %s samples", memory.get_sample_count())
-    logger.info(str())
+    print(f"   [OK] Created session with {memory.get_sample_count()} samples")
+    print()
 
     # Create predictor
-    logger.info("2. Creating PhiPredictor...")
+    print("2. Creating PhiPredictor...")
     predictor = PhiPredictor(memory)
-    logger.info("   [OK] PhiPredictor created")
-    logger.info(str())
+    print("   [OK] PhiPredictor created")
+    print()
 
     # Learn from session
-    logger.info("3. Learning from session...")
+    print("3. Learning from session...")
     success = predictor.learn_from_session()
-    logger.error("   [%s] Learning %s", 'OK' if success else 'FAIL', 'successful' if success else 'failed')
-    logger.info(str())
+    print(f"   [{'OK' if success else 'FAIL'}] Learning {'successful' if success else 'failed'}")
+    print()
 
     # Test predictions
-    logger.info("4. Testing predictions...")
+    print("4. Testing predictions...")
     test_cases = [
         (0.4, 0.6, 0.4),  # Low ICI
         (0.5, 0.6, 0.4),  # Target ICI
         (0.6, 0.6, 0.4),  # High ICI
     ]
 
-    for ici, coherence, criticality in test_cases, coherence, criticality)
-        logger.info("   ICI=%s → Phi=%s (confidence=%s)", ici, result.predicted_phi, result.confidence)
+    for ici, coherence, criticality in test_cases:
+        result = predictor.predict_phi(ici, coherence, criticality)
+        print(f"   ICI={ici:.2f} → Phi={result.predicted_phi:.3f} (confidence={result.confidence:.2f})")
 
-    logger.info("   [OK] Predictions generated")
-    logger.info(str())
+    print("   [OK] Predictions generated")
+    print()
 
     # Test replay
-    logger.info("5. Testing session replay...")
+    print("5. Testing session replay...")
     accuracy, predicted_phis = predictor.replay_session_pattern(memory)
-    logger.info("   Replay accuracy, accuracy)
-    logger.warning("   [%s] Accuracy %s SC-003 (>= 90%)", 'OK' if accuracy >= 0.9 else 'WARN', 'meets' if accuracy >= 0.9 else 'below')
-    logger.info(str())
+    print(f"   Replay accuracy: {accuracy:.1%}")
+    print(f"   [{'OK' if accuracy >= 0.9 else 'WARN'}] Accuracy {'meets' if accuracy >= 0.9 else 'below'} SC-003 (>= 90%)")
+    print()
 
     # Test stats
-    logger.info("6. Testing prediction statistics...")
+    print("6. Testing prediction statistics...")
     stats = predictor.get_prediction_stats()
-    logger.info("   Total predictions, stats['total_predictions'])
-    logger.info("   Has learned model, stats['has_learned_model'])
-    logger.info("   [OK] Statistics computed")
-    logger.info(str())
+    print(f"   Total predictions: {stats['total_predictions']}")
+    print(f"   Has learned model: {stats['has_learned_model']}")
+    print("   [OK] Statistics computed")
+    print()
 
-    logger.info("=" * 60)
-    logger.info("Self-Test PASSED")
-    logger.info("=" * 60)
+    print("=" * 60)
+    print("Self-Test PASSED")
+    print("=" * 60)
 
     return True
 
 
-if __name__ == "__main__")
-
-"""  # auto-closed missing docstring
+if __name__ == "__main__":
+    _self_test()

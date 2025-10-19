@@ -9,7 +9,9 @@ Usage:
 
 Requirements:
 - FR-007: Calibration routine stores offsets in /config/sensors.json
-- SC-005, Dict, List, Optional, Tuple
+- SC-005: Calibration residual error < 2%
+"""
+
 import asyncio
 import argparse
 import json
@@ -23,22 +25,24 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-async def calibrate_sensors(duration_ms, config_path):
+async def calibrate_sensors(duration_ms: int = 10000, config_path: str = "config/sensors.json"):
     """
     Perform sensor calibration and save results
 
     Args:
         duration_ms: Calibration duration in milliseconds
-        config_path)
-    logger.info("Soundlab Φ-Sensor Calibration Utility")
-    logger.info("Feature 023 - Hardware Validation")
-    logger.info("=" * 70)
-    logger.info(str())
+        config_path: Path to save calibration config
+    """
+    print("=" * 70)
+    print("Soundlab Φ-Sensor Calibration Utility")
+    print("Feature 023 - Hardware Validation")
+    print("=" * 70)
+    print()
 
     # Create sensor manager
     config = {
-        'simulation_mode',  # Set to False for real hardware
-        'enable_watchdog',  # Disable watchdog during calibration
+        'simulation_mode': True,  # Set to False for real hardware
+        'enable_watchdog': False,  # Disable watchdog during calibration
     }
 
     logger.info("Initializing sensor manager...")
@@ -54,35 +58,36 @@ async def calibrate_sensors(duration_ms, config_path):
 
     # Perform calibration
     logger.info("Performing calibration (%d ms)...", duration_ms)
-    logger.info("\n%s", '='*70)
-    logger.info("Calibration in progress, duration_ms)
-    logger.info("%s", '='*70)
+    print(f"\n{'='*70}")
+    print(f"Calibration in progress: {duration_ms} ms")
+    print(f"{'='*70}")
 
     calibration = await manager.calibrate(duration_ms=duration_ms)
 
-    logger.info("\nCalibration Results)
-    logger.info("-" * 70)
-    logger.info("Samples collected, calibration['samples'])
-    logger.info("Duration, calibration['duration_ms'])
-    logger.error("Residual error, calibration['residual_error'])
-    logger.info(str())
+    print("\nCalibration Results:")
+    print("-" * 70)
+    print(f"Samples collected: {calibration['samples']}")
+    print(f"Duration: {calibration['duration_ms']} ms")
+    print(f"Residual error: {calibration['residual_error']:.2f}%")
+    print()
 
     # Show channel ranges
     for channel in ['phi_depth', 'phi_phase', 'coherence', 'criticality']:
         if channel in calibration:
             data = calibration[channel]
-            logger.info("%s, channel)
-            logger.info("  Min, data['min'])
-            logger.info("  Max, data['max'])
-            logger.info("  Mean, data['mean'])
-            logger.info("  Std, data['std'])
-            logger.info(str())
+            print(f"{channel}:")
+            print(f"  Min:  {data['min']:.4f}")
+            print(f"  Max:  {data['max']:.4f}")
+            print(f"  Mean: {data['mean']:.4f}")
+            print(f"  Std:  {data['std']:.4f}")
+            print()
 
     # Check residual error (SC-005)
     if calibration['residual_error'] >= 2.0:
-        logger.error("⚠ WARNING, calibration['residual_error'])
-        logger.info("  Calibration may be inaccurate. Consider recalibrating.")
-    else, calibration['residual_error'])
+        print(f"⚠ WARNING: Residual error {calibration['residual_error']:.2f}% exceeds 2% threshold")
+        print("  Calibration may be inaccurate. Consider recalibrating.")
+    else:
+        print(f"✓ Residual error {calibration['residual_error']:.2f}% within acceptable range")
 
     # Save calibration
     config_file = Path(config_path)
@@ -91,10 +96,10 @@ async def calibrate_sensors(duration_ms, config_path):
     logger.info("Saving calibration to %s...", config_path)
     await manager.save_calibration(calibration, str(config_file))
 
-    logger.info(str())
-    logger.info("=" * 70)
-    logger.info("✓ Calibration saved to, config_path)
-    logger.info("=" * 70)
+    print()
+    print("=" * 70)
+    print(f"✓ Calibration saved to: {config_path}")
+    print("=" * 70)
 
     # Stop acquisition
     await manager.stop()
@@ -102,28 +107,35 @@ async def calibrate_sensors(duration_ms, config_path):
     return calibration
 
 
-def main() -> None)
+def main():
+    parser = argparse.ArgumentParser(
+        description="Calibrate Φ-sensors and save calibration data"
+    )
 
     parser.add_argument(
         '--duration',
         type=int,
         default=10000,
-        help='Calibration duration in milliseconds (default)'
+        help='Calibration duration in milliseconds (default: 10000)'
+    )
 
     parser.add_argument(
         '--output',
         type=str,
         default='config/sensors.json',
-        help='Output path for calibration data (default)'
+        help='Output path for calibration data (default: config/sensors.json)'
+    )
 
     parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
+    )
 
     args = parser.parse_args()
 
-    if args.verbose).setLevel(logging.DEBUG)
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     # Run calibration
     asyncio.run(calibrate_sensors(
@@ -132,4 +144,5 @@ def main() -> None)
     ))
 
 
-if __name__ == "__main__")
+if __name__ == "__main__":
+    main()

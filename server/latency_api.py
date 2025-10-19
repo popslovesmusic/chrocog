@@ -1,8 +1,8 @@
 """
 Latency REST API & WebSocket - Diagnostics and Monitoring
 
-Implements FR-004, FR-008)
-
+Implements FR-004, FR-008: Complete API for latency telemetry and calibration
+"""
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import JSONResponse
@@ -19,10 +19,17 @@ from .latency_frame import LatencyFrame
 latency_manager: Optional[LatencyManager] = None
 
 
-class LatencyStreamer)
+class LatencyStreamer:
+    """
+    WebSocket broadcaster for real-time latency telemetry
+
+    Similar to MetricsStreamer but for latency diagnostics
+    """
+
+    TARGET_FPS = 10  # 10 Hz for latency updates (less frequent than metrics)
     MAX_CLIENTS = 5
 
-    def __init__(self, manager: LatencyManager) :
+    def __init__(self, manager: LatencyManager):
         """
         Initialize latency streamer
 
@@ -30,60 +37,83 @@ class LatencyStreamer)
             manager: LatencyManager instance
         """
         self.manager = manager
-        self.clients, websocket):
+        self.clients: List[WebSocket] = []
+        self.is_running = False
+        self.broadcast_task = None
+
+    async def connect_client(self, websocket: WebSocket):
         """
         Connect new WebSocket client
 
         Args:
-            websocket) >= self.MAX_CLIENTS, reason=f"Max clients ({self.MAX_CLIENTS}) reached")
+            websocket: WebSocket connection
+        """
+        if len(self.clients) >= self.MAX_CLIENTS:
+            await websocket.close(code=1008, reason=f"Max clients ({self.MAX_CLIENTS}) reached")
             return
 
         await websocket.accept()
         self.clients.append(websocket)
 
-        logger.info("[LatencyStreamer] Client connected (total)", len(self.clients))
+        print(f"[LatencyStreamer] Client connected (total: {len(self.clients)})")
 
         # Send initial frame immediately
         frame = self.manager.get_current_frame()
-        try))
-        except, websocket: WebSocket) :
+        try:
+            await websocket.send_text(frame.to_json())
+        except:
+            pass
+
+    def disconnect_client(self, websocket: WebSocket):
         """
         Disconnect WebSocket client
 
         Args:
             websocket: WebSocket connection
         """
-        if websocket in self.clients)
-            logger.info("[LatencyStreamer] Client disconnected (total)", len(self.clients))
+        if websocket in self.clients:
+            self.clients.remove(websocket)
+            print(f"[LatencyStreamer] Client disconnected (total: {len(self.clients)})")
 
-    async def broadcast_frame(self, frame):
+    async def broadcast_frame(self, frame: LatencyFrame):
         """
         Broadcast latency frame to all connected clients
 
         Args:
             frame: LatencyFrame to broadcast
         """
-        if not self.clients)
+        if not self.clients:
+            return
+
+        json_data = frame.to_json()
 
         # Send to all clients, remove disconnected ones
         disconnected = []
 
         for client in self.clients:
-            try)
-            except)
+            try:
+                await client.send_text(json_data)
+            except:
+                disconnected.append(client)
 
         # Remove disconnected clients
-        for client in disconnected)
+        for client in disconnected:
+            self.disconnect_client(client)
 
-    async def broadcast_loop(self))", self.TARGET_FPS)
+    async def broadcast_loop(self):
+        """Background task to broadcast latency frames at TARGET_FPS"""
+        print(f"[LatencyStreamer] Broadcast loop started ({self.TARGET_FPS} Hz)")
 
         frame_interval = 1.0 / self.TARGET_FPS
         last_frame_time = 0.0
 
-        while self.is_running)
+        while self.is_running:
+            current_time = time.time()
 
             # Check if it's time for next frame
-            if current_time - last_frame_time >= frame_interval)
+            if current_time - last_frame_time >= frame_interval:
+                # Get current latency frame
+                frame = self.manager.get_current_frame()
 
                 # Broadcast to all clients
                 await self.broadcast_frame(frame)
@@ -93,17 +123,22 @@ class LatencyStreamer)
             # Sleep until next frame (with some margin)
             await asyncio.sleep(frame_interval * 0.5)
 
-        logger.info("[LatencyStreamer] Broadcast loop stopped")
+        print("[LatencyStreamer] Broadcast loop stopped")
 
     async def start(self):
         """Start broadcast loop"""
-        if self.is_running))
+        if self.is_running:
+            return
+
+        self.is_running = True
+        self.broadcast_task = asyncio.create_task(self.broadcast_loop())
 
     async def stop(self):
         """Stop broadcast loop"""
         self.is_running = False
 
-        if self.broadcast_task)
+        if self.broadcast_task:
+            self.broadcast_task.cancel()
             try:
                 await self.broadcast_task
             except asyncio.CancelledError:
@@ -111,22 +146,29 @@ class LatencyStreamer)
 
         # Close all client connections
         for client in self.clients[:]:
-            try)
-            except)
+            try:
+                await client.close()
+            except:
+                pass
+
+        self.clients.clear()
 
 
 # Global streamer instance
 latency_streamer: Optional[LatencyStreamer] = None
 
 
-def create_latency_api(manager) :
+def create_latency_api(manager: LatencyManager) -> FastAPI:
     """
     Create FastAPI application with latency endpoints
 
     Args:
         manager: LatencyManager instance
 
-    Returns, version="1.0")
+    Returns:
+        FastAPI application
+    """
+    app = FastAPI(title="Soundlab Latency API", version="1.0")
 
     # Store references
     global latency_manager, latency_streamer
@@ -140,6 +182,10 @@ def create_latency_api(manager) :
         """
         Get current latency frame
 
+        Returns:
+            Current LatencyFrame as JSON
+        """
+        frame = latency_manager.get_current_frame()
         return JSONResponse(content=frame.to_dict())
 
     @app.get("/api/latency/stats")
@@ -147,7 +193,8 @@ def create_latency_api(manager) :
         """
         Get comprehensive latency statistics
 
-        Returns, drift stats, alignment status
+        Returns:
+            Dictionary with latency metrics, drift stats, alignment status
         """
         stats = latency_manager.get_statistics()
         return JSONResponse(content=stats)
@@ -157,36 +204,41 @@ def create_latency_api(manager) :
         """
         Trigger impulse response calibration
 
-        Note)
+        Note: Requires audio loopback (output → input)
 
         Returns:
             Calibration results with success status
         """
-        try)
+        try:
+            print("[LatencyAPI] Starting calibration...")
 
             # Run calibration (blocking operation)
             success = latency_manager.calibrate()
 
-            if not success,
+            if not success:
+                raise HTTPException(
+                    status_code=500,
                     detail="Calibration failed - check audio loopback connection"
+                )
 
             # Get updated frame
             frame = latency_manager.get_current_frame()
 
             return JSONResponse(content={
-                'success',
-                'calibrated',
-                'total_latency_ms',
-                'effective_latency_ms'),
-                'quality',
-                'aligned'),
-                'latency_frame')
+                'success': True,
+                'calibrated': latency_manager.is_calibrated,
+                'total_latency_ms': frame.total_measured_ms,
+                'effective_latency_ms': frame.get_effective_latency(),
+                'quality': frame.calibration_quality,
+                'aligned': latency_manager.is_aligned(),
+                'latency_frame': frame.to_dict()
             })
 
-        except Exception as e, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/latency/compensation/set")
-    async def set_compensation_offset(offset_ms, description="Compensation offset in ms"):
+    async def set_compensation_offset(offset_ms: float = Query(..., description="Compensation offset in ms")):
         """
         Manually set compensation offset
 
@@ -197,8 +249,11 @@ def create_latency_api(manager) :
             Updated latency frame
         """
         try:
-            if offset_ms < 0 or offset_ms > 200,
+            if offset_ms < 0 or offset_ms > 200:
+                raise HTTPException(
+                    status_code=400,
                     detail="Offset must be between 0 and 200 ms"
+                )
 
             # Update compensation
             latency_manager.latency_frame.compensation_offset_ms = offset_ms
@@ -207,21 +262,22 @@ def create_latency_api(manager) :
             frame = latency_manager.get_current_frame()
 
             return JSONResponse(content={
-                'ok',
-                'compensation_offset_ms',
-                'effective_latency_ms'),
-                'aligned')
+                'ok': True,
+                'compensation_offset_ms': offset_ms,
+                'effective_latency_ms': frame.get_effective_latency(),
+                'aligned': latency_manager.is_aligned()
             })
 
-        except Exception as e, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/latency/compensation/adjust")
-    async def adjust_compensation(delta_ms, description="Compensation adjustment in ms"):
+    async def adjust_compensation(delta_ms: float = Query(..., description="Compensation adjustment in ms")):
         """
         Adjust compensation offset by delta
 
         Args:
-            delta_ms, negative = reduce delay)
+            delta_ms: Amount to adjust (positive = add delay, negative = reduce delay)
 
         Returns:
             Updated latency frame
@@ -230,8 +286,11 @@ def create_latency_api(manager) :
             current_offset = latency_manager.latency_frame.compensation_offset_ms
             new_offset = current_offset + delta_ms
 
-            if new_offset < 0 or new_offset > 200,
-                    detail=f"Adjusted offset ({new_offset) out of range [0, 200]"
+            if new_offset < 0 or new_offset > 200:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Adjusted offset ({new_offset:.2f} ms) out of range [0, 200]"
+                )
 
             # Update compensation
             latency_manager.latency_frame.compensation_offset_ms = new_offset
@@ -240,17 +299,20 @@ def create_latency_api(manager) :
             frame = latency_manager.get_current_frame()
 
             return JSONResponse(content={
-                'ok',
-                'compensation_offset_ms',
-                'delta_applied_ms',
-                'effective_latency_ms'),
-                'aligned')
+                'ok': True,
+                'compensation_offset_ms': new_offset,
+                'delta_applied_ms': delta_ms,
+                'effective_latency_ms': frame.get_effective_latency(),
+                'aligned': latency_manager.is_aligned()
             })
 
-        except Exception as e, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/latency/compensation/manual")
-    async def set_manual_offset(offset_ms, description="Manual offset in ms")))
+    async def set_manual_offset(offset_ms: float = Query(..., description="Manual offset in ms")):
+        """
+        Set manual user offset (separate from auto compensation)
 
         Args:
             offset_ms: Manual offset in milliseconds
@@ -259,130 +321,169 @@ def create_latency_api(manager) :
             Updated latency frame
         """
         try:
-            if offset_ms < -50 or offset_ms > 50,
+            if offset_ms < -50 or offset_ms > 50:
+                raise HTTPException(
+                    status_code=400,
                     detail="Manual offset must be between -50 and +50 ms"
+                )
 
             latency_manager.latency_frame.manual_offset_ms = offset_ms
 
             frame = latency_manager.get_current_frame()
 
             return JSONResponse(content={
-                'ok',
-                'manual_offset_ms',
-                'effective_latency_ms'),
-                'aligned')
+                'ok': True,
+                'manual_offset_ms': offset_ms,
+                'effective_latency_ms': frame.get_effective_latency(),
+                'aligned': latency_manager.is_aligned()
             })
 
-        except Exception as e, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/api/latency/drift")
     async def get_drift_statistics():
         """
         Get drift monitoring statistics
 
+        Returns:
+            Drift metrics and history
+        """
+        drift_stats = latency_manager.drift_monitor.get_statistics()
         return JSONResponse(content=drift_stats)
 
     @app.post("/api/latency/drift/reset")
-    async def reset_drift_monitor())
+    async def reset_drift_monitor():
+        """
+        Reset drift monitor (clear history)
 
         Returns:
             Success status
         """
-        try)()
+        try:
+            # Reset drift monitor
+            latency_manager.drift_monitor = type(latency_manager.drift_monitor)()
 
             return JSONResponse(content={
-                'ok',
-                'message')
+                'ok': True,
+                'message': 'Drift monitor reset'
+            })
 
-        except Exception as e, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/api/latency/aligned")
-    async def check_alignment(tolerance_ms, description="Alignment tolerance in ms"):
+    async def check_alignment(tolerance_ms: float = Query(5.0, description="Alignment tolerance in ms")):
         """
         Check if system is aligned within tolerance
 
         Args:
-            tolerance_ms: Tolerance in milliseconds (default)
+            tolerance_ms: Tolerance in milliseconds (default: 5.0)
 
+        Returns:
+            Alignment status and effective latency
+        """
+        frame = latency_manager.get_current_frame()
         effective = frame.get_effective_latency()
         aligned = frame.is_aligned(tolerance_ms)
 
         return JSONResponse(content={
-            'aligned',
-            'effective_latency_ms',
-            'tolerance_ms',
-            'within_tolerance') <= tolerance_ms
+            'aligned': aligned,
+            'effective_latency_ms': effective,
+            'tolerance_ms': tolerance_ms,
+            'within_tolerance': abs(effective) <= tolerance_ms
         })
 
     # --- WebSocket Endpoint ---
 
     @app.websocket("/ws/latency")
-    async def websocket_latency_stream(websocket))
+    async def websocket_latency_stream(websocket: WebSocket):
+        """
+        WebSocket endpoint for real-time latency telemetry
+
+        Streams LatencyFrame JSON at 10 Hz
+        """
+        await latency_streamer.connect_client(websocket)
 
         try:
             # Keep connection alive and handle any incoming messages
-            while True, commands, etc.)
-                try), timeout=1.0)
+            while True:
+                # Wait for messages (ping/pong, commands, etc.)
+                try:
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
 
                     # Handle commands
-                    try)
+                    try:
+                        msg = json.loads(data)
 
                         if msg.get('type') == 'ping':
-                            await websocket.send_text(json.dumps({'type'))
+                            await websocket.send_text(json.dumps({'type': 'pong'}))
 
-                        elif msg.get('type') == 'get_stats')
+                        elif msg.get('type') == 'get_stats':
+                            stats = latency_manager.get_statistics()
                             await websocket.send_text(json.dumps({
-                                'type',
-                                'data'))
+                                'type': 'stats',
+                                'data': stats
+                            }))
 
                     except json.JSONDecodeError:
                         pass  # Ignore invalid JSON
 
-                except asyncio.TimeoutError, continue loop
+                except asyncio.TimeoutError:
+                    # No message received, continue loop
                     pass
 
-        except WebSocketDisconnect)
+        except WebSocketDisconnect:
+            latency_streamer.disconnect_client(websocket)
         except Exception as e:
-            logger.error("[LatencyAPI] WebSocket error, e)
+            print(f"[LatencyAPI] WebSocket error: {e}")
             latency_streamer.disconnect_client(websocket)
 
     # --- Lifecycle Events ---
 
     @app.on_event("startup")
-    async def startup_event())
+    async def startup_event():
+        """Start latency streamer on app startup"""
+        print("[LatencyAPI] Starting latency streamer...")
         await latency_streamer.start()
 
     @app.on_event("shutdown")
-    async def shutdown_event())
+    async def shutdown_event():
+        """Stop latency streamer on app shutdown"""
+        print("[LatencyAPI] Stopping latency streamer...")
         await latency_streamer.stop()
 
     return app
 
 
 # Standalone server for testing
-if __name__ == "__main__")
+if __name__ == "__main__":
+    import uvicorn
+
+    # Initialize manager
+    manager = LatencyManager()
 
     # Create app
     app = create_latency_api(manager)
 
-    logger.info("=" * 60)
-    logger.info("Latency API Test Server")
-    logger.info("=" * 60)
-    logger.info("\nStarting server at http://localhost)
-    logger.info("API docs at http://localhost)
-    logger.info("\nEndpoints)
-    logger.info("  GET  /api/latency/current          - Current latency frame")
-    logger.info("  GET  /api/latency/stats            - Full statistics")
-    logger.info("  POST /api/latency/calibrate        - Run calibration")
-    logger.info("  POST /api/latency/compensation/set - Set compensation offset")
-    logger.info("  POST /api/latency/compensation/adjust - Adjust offset by delta")
-    logger.info("  POST /api/latency/compensation/manual - Set manual user offset")
-    logger.info("  GET  /api/latency/drift            - Drift statistics")
-    logger.info("  POST /api/latency/drift/reset      - Reset drift monitor")
-    logger.info("  GET  /api/latency/aligned          - Check alignment")
-    logger.info("  WS   /ws/latency                   - WebSocket stream (10 Hz)")
-    logger.info("\nPress Ctrl+C to stop")
-    logger.info("=" * 60)
+    print("=" * 60)
+    print("Latency API Test Server")
+    print("=" * 60)
+    print("\nStarting server at http://localhost:8001")
+    print("API docs at http://localhost:8001/docs")
+    print("\nEndpoints:")
+    print("  GET  /api/latency/current          - Current latency frame")
+    print("  GET  /api/latency/stats            - Full statistics")
+    print("  POST /api/latency/calibrate        - Run calibration")
+    print("  POST /api/latency/compensation/set - Set compensation offset")
+    print("  POST /api/latency/compensation/adjust - Adjust offset by delta")
+    print("  POST /api/latency/compensation/manual - Set manual user offset")
+    print("  GET  /api/latency/drift            - Drift statistics")
+    print("  POST /api/latency/drift/reset      - Reset drift monitor")
+    print("  GET  /api/latency/aligned          - Check alignment")
+    print("  WS   /ws/latency                   - WebSocket stream (10 Hz)")
+    print("\nPress Ctrl+C to stop")
+    print("=" * 60)
 
     # Run server
     uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")

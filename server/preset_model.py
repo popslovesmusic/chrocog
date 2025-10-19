@@ -1,8 +1,8 @@
 """
 Preset Data Model - Versioned State Container
 
-Implements FR-001, FR-006)
-
+Implements FR-001, FR-006: JSON schema v1 with validation and migration
+"""
 
 import uuid
 import json
@@ -22,14 +22,28 @@ class EngineState:
     """Engine parameters for D-ASE ChromaticFieldProcessor"""
     sample_rate: int = 48000
     num_channels: int = 8
-    frequencies: List[float] = field(default_factory=lambda, 0.81, 1.31, 2.12, 3.43, 5.55, 8.97, 14.52
+    frequencies: List[float] = field(default_factory=lambda: [
+        0.5, 0.81, 1.31, 2.12, 3.43, 5.55, 8.97, 14.52
     ])
-    amplitudes: List[float] = field(default_factory=lambda, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25
+    amplitudes: List[float] = field(default_factory=lambda: [
+        0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3, 0.25
     ])
-    coupling_strength) :
-            raise ValueError(f"Invalid sample_rate)
+    coupling_strength: float = 1.0
 
-        if self.coupling_strength < 0.0 or self.coupling_strength > 2.0, 2]")
+    def validate(self) -> bool:
+        """Validate engine state parameters"""
+        # Check array lengths match num_channels
+        if len(self.frequencies) != self.num_channels:
+            raise ValueError(f"frequencies length {len(self.frequencies)} != num_channels {self.num_channels}")
+        if len(self.amplitudes) != self.num_channels:
+            raise ValueError(f"amplitudes length {len(self.amplitudes)} != num_channels {self.num_channels}")
+
+        # Check value ranges
+        if self.sample_rate not in [44100, 48000, 96000]:
+            raise ValueError(f"Invalid sample_rate: {self.sample_rate}")
+
+        if self.coupling_strength < 0.0 or self.coupling_strength > 2.0:
+            raise ValueError(f"coupling_strength {self.coupling_strength} out of range [0, 2]")
 
         return True
 
@@ -38,20 +52,23 @@ class EngineState:
 class PhiState:
     """Φ-modulation parameters"""
     mode: PhiModeType = "internal"
-    depth, 1.618]
+    depth: float = 0.618  # [0, 1.618]
     phase: float = 0.0  # radians
-    frequency)
+    frequency: Optional[float] = 0.1  # Hz (for internal/sensor modes)
 
-    def validate(self) :
+    def validate(self) -> bool:
         """Validate Φ parameters"""
         PHI = 1.618033988749895
 
-        if self.depth < 0.0 or self.depth > PHI, {PHI}]")
+        if self.depth < 0.0 or self.depth > PHI:
+            raise ValueError(f"phi.depth {self.depth} out of range [0, {PHI}]")
 
-        if self.phase < -6.28318 or self.phase > 6.28318, 2π]")
+        if self.phase < -6.28318 or self.phase > 6.28318:
+            raise ValueError(f"phi.phase {self.phase} out of range [-2π, 2π]")
 
         if self.frequency is not None:
-            if self.frequency < 0.01 or self.frequency > 10.0, 10]")
+            if self.frequency < 0.01 or self.frequency > 10.0:
+                raise ValueError(f"phi.frequency {self.frequency} out of range [0.01, 10]")
 
         return True
 
@@ -60,17 +77,29 @@ class PhiState:
 class DownmixState:
     """Downmix strategy and weights"""
     strategy: StrategyType = "spatial"
-    weights_l: List[float] = field(default_factory=lambda, 0.6, 0.4, 0.2, 0.0, 0.0, 0.0, 0.0
+    weights_l: List[float] = field(default_factory=lambda: [
+        0.8, 0.6, 0.4, 0.2, 0.0, 0.0, 0.0, 0.0
     ])
-    weights_r: List[float] = field(default_factory=lambda, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8
+    weights_r: List[float] = field(default_factory=lambda: [
+        0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8
     ])
 
-    @lru_cache(maxsize=128)
-    def validate(self) :
+    def validate(self) -> bool:
+        """Validate downmix parameters"""
+        if len(self.weights_l) != 8:
+            raise ValueError(f"weights_l length {len(self.weights_l)} != 8")
+        if len(self.weights_r) != 8:
+            raise ValueError(f"weights_r length {len(self.weights_r)} != 8")
+
+        return True
+
+
+@dataclass
+class UIState:
     """UI configuration"""
     fft_size: int = 2048
-    meters: Dict = field(default_factory=lambda: {"show")
-    visualizer: Dict = field(default_factory=lambda: {"palette")
+    meters: Dict = field(default_factory=lambda: {"show": True})
+    visualizer: Dict = field(default_factory=lambda: {"palette": "chromatic"})
 
 
 @dataclass
@@ -82,21 +111,21 @@ class Preset:
     """
     # Metadata
     schema_version: int = 1
-    id: str = field(default_factory=lambda)))
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = "Untitled Preset"
-    tags)
-    created_at: str = field(default_factory=lambda).isoformat() + 'Z')
-    modified_at: str = field(default_factory=lambda).isoformat() + 'Z')
+    tags: List[str] = field(default_factory=list)
+    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + 'Z')
+    modified_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + 'Z')
     author: str = "user@local"
     notes: str = ""
 
     # State components
-    engine)
-    phi)
-    downmix)
-    ui)
+    engine: EngineState = field(default_factory=EngineState)
+    phi: PhiState = field(default_factory=PhiState)
+    downmix: DownmixState = field(default_factory=DownmixState)
+    ui: UIState = field(default_factory=UIState)
 
-    def validate(self) :
+    def validate(self) -> bool:
         """
         Validate entire preset
 
@@ -108,10 +137,11 @@ class Preset:
         """
         # Validate schema version
         if self.schema_version != 1:
-            raise ValueError(f"Unsupported schema_version)
+            raise ValueError(f"Unsupported schema_version: {self.schema_version}")
 
         # Validate name
-        if not self.name or len(self.name) == 0)
+        if not self.name or len(self.name) == 0:
+            raise ValueError("name cannot be empty")
 
         # Validate components
         self.engine.validate()
@@ -120,56 +150,86 @@ class Preset:
 
         return True
 
-    def to_dict(self) :
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
+
+    def to_json(self, pretty: bool = False) -> str:
         """
         Convert to JSON string
 
         Args:
-            pretty, format with indentation
+            pretty: If True, format with indentation
 
-        if pretty, indent=2)
-        else)
+        Returns:
+            JSON string
+        """
+        data = self.to_dict()
+        if pretty:
+            return json.dumps(data, indent=2)
+        else:
+            return json.dumps(data)
 
     @classmethod
-    def from_dict(cls, data) :
+    def from_dict(cls, data: Dict) -> 'Preset':
         """
         Create Preset from dictionary
 
         Args:
             data: Dictionary representation
 
-        Returns, dict))
+        Returns:
+            Preset instance
+        """
+        # Handle nested objects
+        if 'engine' in data and isinstance(data['engine'], dict):
+            data['engine'] = EngineState(**data['engine'])
 
-        if 'phi' in data and isinstance(data['phi'], dict))
+        if 'phi' in data and isinstance(data['phi'], dict):
+            data['phi'] = PhiState(**data['phi'])
 
-        if 'downmix' in data and isinstance(data['downmix'], dict))
+        if 'downmix' in data and isinstance(data['downmix'], dict):
+            data['downmix'] = DownmixState(**data['downmix'])
 
-        if 'ui' in data and isinstance(data['ui'], dict))
+        if 'ui' in data and isinstance(data['ui'], dict):
+            data['ui'] = UIState(**data['ui'])
 
         # Filter to only valid fields
-        valid_fields = {k, v in data.items() if k in cls.__dataclass_fields__}
+        valid_fields = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
 
         return cls(**valid_fields)
 
     @classmethod
-    def from_json(cls, json_str) :
+    def from_json(cls, json_str: str) -> 'Preset':
         """
         Create Preset from JSON string
 
         Args:
             json_str: JSON representation
 
+        Returns:
+            Preset instance
+        """
+        data = json.loads(json_str)
         return cls.from_dict(data)
 
-    def clone(self) :
+    def clone(self) -> 'Preset':
         """
         Create a deep copy of this preset
 
+        Returns:
+            New Preset instance with same values but new ID
+        """
+        data = self.to_dict()
         data['id'] = str(uuid.uuid4())
         data['modified_at'] = datetime.utcnow().isoformat() + 'Z'
         return Preset.from_dict(data)
 
-    def update_timestamp(self) :
+    def update_timestamp(self):
+        """Update modified_at timestamp"""
+        self.modified_at = datetime.utcnow().isoformat() + 'Z'
+
+    def diff(self, other: 'Preset') -> Dict:
         """
         Calculate differences between two presets
 
@@ -177,28 +237,36 @@ class Preset:
             other: Preset to compare with
 
         Returns:
-            Dictionary of changed fields with {field, new)}
+            Dictionary of changed fields with {field: (old, new)}
         """
         changes = {}
 
-        def compare_recursive(path: str, val1, val2) :
-                    if key in val1 and key in val2, val1[key], val2[key])
-                    elif key in val1, None)
-                    else, val2[key])
+        def compare_recursive(path: str, val1, val2):
+            if isinstance(val1, dict) and isinstance(val2, dict):
+                for key in set(val1.keys()) | set(val2.keys()):
+                    if key in val1 and key in val2:
+                        compare_recursive(f"{path}.{key}" if path else key, val1[key], val2[key])
+                    elif key in val1:
+                        changes[f"{path}.{key}" if path else key] = (val1[key], None)
+                    else:
+                        changes[f"{path}.{key}" if path else key] = (None, val2[key])
             elif isinstance(val1, list) and isinstance(val2, list):
-                if val1 != val2, val2)
+                if val1 != val2:
+                    changes[path] = (val1, val2)
             else:
-                if val1 != val2, val2)
+                if val1 != val2:
+                    changes[path] = (val1, val2)
 
         compare_recursive("", self.to_dict(), other.to_dict())
         return changes
 
 
-def migrate_v0_to_v1(data_v0) :
+def migrate_v0_to_v1(data_v0: Dict) -> Preset:
     """
     Migrate schema v0 to v1
 
-    Legacy field mappings)
+    Legacy field mappings:
+    - "lowGain" → engine.frequencies[0-2] (if present)
     - "midGain" → engine.frequencies[3-4]
     - "highGain" → engine.frequencies[5-7]
     - Add schema_version = 1
@@ -206,6 +274,8 @@ def migrate_v0_to_v1(data_v0) :
     Args:
         data_v0: Legacy preset dictionary
 
+    Returns:
+        Migrated Preset (v1)
     """
     # Start with defaults
     preset = Preset()
@@ -213,14 +283,17 @@ def migrate_v0_to_v1(data_v0) :
     # Copy metadata if present
     if 'name' in data_v0:
         preset.name = data_v0['name']
-    if 'created_at' in data_v0 or 'timestamp' in data_v0, data_v0.get('timestamp', preset.created_at))
+    if 'created_at' in data_v0 or 'timestamp' in data_v0:
+        preset.created_at = data_v0.get('created_at', data_v0.get('timestamp', preset.created_at))
 
     # Migrate engine parameters (legacy may have different structure)
-    if 'low' in data_v0)
+    if 'low' in data_v0:
+        # Map legacy EQ gains to frequencies (approximate)
         pass  # Would need actual legacy schema to implement
 
     # Migrate Φ parameters
-    if 'drive' in data_v0) / 10.0  # Example mapping
+    if 'drive' in data_v0:
+        preset.phi.depth = float(data_v0['drive']) / 10.0  # Example mapping
 
     # Always set schema_version to 1
     preset.schema_version = 1
@@ -231,84 +304,106 @@ def migrate_v0_to_v1(data_v0) :
     return preset
 
 
-def create_default_preset(name) :
+def create_default_preset(name: str = "Default") -> Preset:
     """
     Create a default preset with safe values
 
     Args:
         name: Preset name
 
-    Returns,
+    Returns:
+        Default Preset instance
+    """
+    return Preset(
+        name=name,
         tags=["default"],
         notes="Default safe configuration"
+    )
+
 
 # Self-test function
-def _self_test() : %s (ID)", preset.name, preset.id[)
-        logger.info("   ✓ Creation OK")
+def _self_test():
+    """Test Preset model functionality"""
+    print("=" * 60)
+    print("Preset Model Self-Test")
+    print("=" * 60)
+
+    try:
+        # Test basic creation
+        print("\n1. Creating preset...")
+        preset = Preset(
+            name="Test Preset",
+            tags=["test", "lab"],
+            notes="Test configuration"
+        )
+        print(f"   Created: {preset.name} (ID: {preset.id[:8]}...)")
+        print("   ✓ Creation OK")
 
         # Test validation
-        logger.info("\n2. Testing validation...")
+        print("\n2. Testing validation...")
         is_valid = preset.validate()
-        logger.info("   Valid, is_valid)
+        print(f"   Valid: {is_valid}")
         assert is_valid
-        logger.info("   ✓ Validation OK")
+        print("   ✓ Validation OK")
 
         # Test JSON serialization
-        logger.info("\n3. Testing JSON serialization...")
+        print("\n3. Testing JSON serialization...")
         json_str = preset.to_json()
-        logger.info("   JSON length, len(json_str))
+        print(f"   JSON length: {len(json_str)} bytes")
 
         preset_restored = Preset.from_json(json_str)
         assert preset_restored.name == preset.name
         assert preset_restored.id == preset.id
-        logger.info("   ✓ JSON round-trip OK")
+        print("   ✓ JSON round-trip OK")
 
         # Test cloning
-        logger.info("\n4. Testing cloning...")
+        print("\n4. Testing cloning...")
         preset_copy = preset.clone()
         assert preset_copy.name == preset.name
         assert preset_copy.id != preset.id  # New ID
-        logger.info("   Cloned with new ID, preset_copy.id[)
-        logger.info("   ✓ Cloning OK")
+        print(f"   Cloned with new ID: {preset_copy.id[:8]}...")
+        print("   ✓ Cloning OK")
 
         # Test diff
-        logger.info("\n5. Testing diff...")
+        print("\n5. Testing diff...")
         preset_copy.name = "Modified Preset"
         preset_copy.engine.coupling_strength = 1.5
         changes = preset.diff(preset_copy)
-        logger.info("   Changes detected, len(changes))
+        print(f"   Changes detected: {len(changes)}")
         for key, (old, new) in list(changes.items())[:3]:
-            logger.info("     %s, key, old, new)
+            print(f"     {key}: {old} → {new}")
         assert 'name' in changes
-        logger.info("   ✓ Diff OK")
+        print("   ✓ Diff OK")
 
         # Test invalid preset
-        logger.error("\n6. Testing validation errors...")
+        print("\n6. Testing validation errors...")
         invalid_preset = Preset(name="Invalid")
         invalid_preset.phi.depth = 99.0  # Out of range
-        try)
+        try:
+            invalid_preset.validate()
             assert False, "Should have raised ValueError"
         except ValueError as e:
-            logger.error("   Caught expected error, e)
-            logger.error("   ✓ Validation error handling OK")
+            print(f"   Caught expected error: {e}")
+            print("   ✓ Validation error handling OK")
 
         # Test default preset
-        logger.info("\n7. Testing default preset...")
+        print("\n7. Testing default preset...")
         default = create_default_preset()
         default.validate()
-        logger.info("   Default preset, default.name)
-        logger.info("   ✓ Default preset OK")
+        print(f"   Default preset: {default.name}")
+        print("   ✓ Default preset OK")
 
-        logger.info("\n" + "=" * 60)
-        logger.info("Self-Test PASSED ✓")
-        logger.info("=" * 60)
+        print("\n" + "=" * 60)
+        print("Self-Test PASSED ✓")
+        print("=" * 60)
         return True
 
     except Exception as e:
-        logger.error("\n✗ Self-Test FAILED, e)
+        print(f"\n✗ Self-Test FAILED: {e}")
         import traceback
         traceback.print_exc()
         return False
 
 
-if __name__ == "__main__")
+if __name__ == "__main__":
+    _self_test()

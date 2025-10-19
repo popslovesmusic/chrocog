@@ -5,11 +5,13 @@ Loads and analyzes multiple recorded sessions for comparative insights.
 
 Features:
 - FR-001: Load and compare multiple sessions
-
+- FR-002: Compute statistical metrics (mean, variance, delta)
 - SC-001: Handle multiple sessions <= 1 GB RAM
 
 Requirements:
 - FR-001: System MUST load and compare multiple sessions simultaneously
+- FR-002: System MUST compute statistical metrics
+"""
 
 import numpy as np
 from typing import List, Dict, Optional, Tuple
@@ -51,7 +53,9 @@ class SessionStats:
 class ComparisonResult:
     """Result of comparing two sessions"""
     session_a_id: str
-    session_b_id)
+    session_b_id: str
+
+    # Delta metrics (FR-002)
     delta_mean_ici: float
     delta_mean_coherence: float
     delta_mean_criticality: float
@@ -72,48 +76,67 @@ class SessionComparator:
     """
     SessionComparator - Multi-session analysis and comparison
 
-
-
+    Handles:
+    - Loading multiple sessions (FR-001)
+    - Computing comparative statistics (FR-002)
+    - Memory-efficient processing (SC-001)
     """
 
-    def __init__(self) :
+    def __init__(self):
         """Initialize SessionComparator"""
-        self.sessions, Dict] = {}
-        self.session_stats, SessionStats] = {}
+        self.sessions: Dict[str, Dict] = {}
+        self.session_stats: Dict[str, SessionStats] = {}
 
-    @lru_cache(maxsize=128)
-    def load_session(self, session_id, session_data) :
+    def load_session(self, session_id: str, session_data: Dict) -> bool:
+        """
+        Load a session for comparison (FR-001)
+
+        Args:
             session_id: Unique identifier for session
             session_data: Session data from StateRecorder
 
         Returns:
             True if loaded successfully
         """
-        try, session_data)
+        try:
+            # Store session data
+            self.sessions[session_id] = session_data
+
+            # Compute statistics
+            stats = self._compute_session_stats(session_id, session_data)
             self.session_stats[session_id] = stats
 
-            logger.info("[SessionComparator] Loaded session, session_id)
+            print(f"[SessionComparator] Loaded session: {session_id}")
             return True
 
         except Exception as e:
-            logger.error("[SessionComparator] Error loading session, e)
+            print(f"[SessionComparator] Error loading session: {e}")
             return False
 
-    @lru_cache(maxsize=128)
-    def unload_session(self, session_id: str) :
+    def unload_session(self, session_id: str):
+        """
+        Unload a session to free memory (SC-001)
+
+        Args:
             session_id: Session to unload
         """
         if session_id in self.sessions:
             del self.sessions[session_id]
             del self.session_stats[session_id]
-            logger.info("[SessionComparator] Unloaded session, session_id)
+            print(f"[SessionComparator] Unloaded session: {session_id}")
 
-    @lru_cache(maxsize=128)
-    def _compute_session_stats(self, session_id, session_data) :
+    def _compute_session_stats(self, session_id: str, session_data: Dict) -> SessionStats:
+        """
+        Compute statistics for a session (FR-002)
+
+        Args:
             session_id: Session identifier
             session_data: Session data
 
-        Returns, {})
+        Returns:
+            SessionStats object
+        """
+        metadata = session_data.get("metadata", {})
         samples_dict = session_data.get("samples", [])
 
         # Extract metric arrays
@@ -138,8 +161,13 @@ class SessionComparator:
             std_phi=float(np.std(phis)),
             min_phi=float(np.min(phis)),
             max_phi=float(np.max(phis))
+        )
 
-    def compare_sessions(self, session_a_id, session_b_id) :
+    def compare_sessions(self, session_a_id: str, session_b_id: str) -> Optional[ComparisonResult]:
+        """
+        Compare two sessions (FR-002)
+
+        Args:
             session_a_id: First session ID
             session_b_id: Second session ID
 
@@ -149,7 +177,12 @@ class SessionComparator:
         if session_a_id not in self.sessions or session_b_id not in self.sessions:
             return None
 
-        try)
+        try:
+            # Get statistics
+            stats_a = self.session_stats[session_a_id]
+            stats_b = self.session_stats[session_b_id]
+
+            # Compute deltas (FR-002)
             delta_ici = stats_b.mean_ici - stats_a.mean_ici
             delta_coherence = stats_b.mean_coherence - stats_a.mean_coherence
             delta_criticality = stats_b.mean_criticality - stats_a.mean_criticality
@@ -180,7 +213,10 @@ class SessionComparator:
             criticalities_a = criticalities_a[:min_len]
             criticalities_b = criticalities_b[:min_len]
             phis_a = phis_a[:min_len]
-            phis_b = phis_b[, icis_b)[0, 1]) if min_len > 1 else 0.0
+            phis_b = phis_b[:min_len]
+
+            # Compute correlations
+            ici_corr = float(np.corrcoef(icis_a, icis_b)[0, 1]) if min_len > 1 else 0.0
             coherence_corr = float(np.corrcoef(coherences_a, coherences_b)[0, 1]) if min_len > 1 else 0.0
             criticality_corr = float(np.corrcoef(criticalities_a, criticalities_b)[0, 1]) if min_len > 1 else 0.0
             phi_corr = float(np.corrcoef(phis_a, phis_b)[0, 1]) if min_len > 1 else 0.0
@@ -203,89 +239,142 @@ class SessionComparator:
                 phi_correlation=phi_corr,
                 ici_ttest_pvalue=float(ici_ttest.pvalue),
                 coherence_ttest_pvalue=float(coherence_ttest.pvalue)
+            )
 
         except Exception as e:
-            logger.error("[SessionComparator] Error comparing sessions, e)
+            print(f"[SessionComparator] Error comparing sessions: {e}")
             return None
 
-    def get_all_stats(self) :
+    def get_all_stats(self) -> Dict[str, SessionStats]:
         """
         Get statistics for all loaded sessions
 
-    def get_session_count(self) : str, ici_offset: float) :
+        Returns:
+            Dictionary mapping session IDs to stats
+        """
+        return self.session_stats.copy()
+
+    def get_session_count(self) -> int:
+        """Get number of loaded sessions"""
+        return len(self.sessions)
+
+    def get_memory_usage(self) -> Dict:
+        """
+        Estimate memory usage (SC-001)
+
+        Returns:
+            Dictionary with memory estimates
+        """
+        import sys
+
+        total_samples = sum(
+            len(session.get("samples", []))
+            for session in self.sessions.values()
+        )
+
+        # Rough estimate: each sample ~200 bytes
+        estimated_mb = (total_samples * 200) / (1024 * 1024)
+
+        return {
+            "session_count": len(self.sessions),
+            "total_samples": total_samples,
+            "estimated_mb": estimated_mb
+        }
+
+
+# Self-test
+def _self_test():
+    """Run basic self-test of SessionComparator"""
+    print("=" * 60)
+    print("SessionComparator Self-Test")
+    print("=" * 60)
+    print()
+
+    import time
+
+    # Create synthetic session data
+    print("1. Creating synthetic sessions...")
+
+    def create_session(session_id: str, ici_offset: float):
+        samples = []
+        for i in range(100):
             samples.append({
-                "timestamp") + i * 0.1,
-                "ici"),
-                "coherence",
-                "criticality",
-                "phi_value",
-                "phi_phase",
-                "phi_depth",
-                "active_source")
+                "timestamp": time.time() + i * 0.1,
+                "ici": 0.5 + ici_offset + 0.05 * np.sin(i * 0.1),
+                "coherence": 0.6,
+                "criticality": 0.4,
+                "phi_value": 1.0,
+                "phi_phase": 0.0,
+                "phi_depth": 0.5,
+                "active_source": "test"
+            })
 
         return {
             "metadata": {
-                "session_id",
-                "duration",
-                "sample_count",
-            "samples", 0.0)
+                "session_id": session_id,
+                "duration": 10.0,
+                "sample_count": 100
+            },
+            "samples": samples
+        }
+
+    session_a = create_session("session_a", 0.0)
     session_b = create_session("session_b", 0.1)  # Higher ICI
-    logger.info("   [OK] Created 2 synthetic sessions")
-    logger.info(str())
+    print("   [OK] Created 2 synthetic sessions")
+    print()
 
     # Create comparator
-    logger.info("2. Creating SessionComparator...")
+    print("2. Creating SessionComparator...")
     comparator = SessionComparator()
-    logger.info("   [OK] SessionComparator created")
-    logger.info(str())
+    print("   [OK] SessionComparator created")
+    print()
 
     # Load sessions
-    logger.info("3. Loading sessions...")
+    print("3. Loading sessions...")
     comparator.load_session("session_a", session_a)
     comparator.load_session("session_b", session_b)
-    logger.info("   [OK] Loaded %s sessions", comparator.get_session_count())
-    logger.info(str())
+    print(f"   [OK] Loaded {comparator.get_session_count()} sessions")
+    print()
 
     # Get statistics
-    logger.info("4. Computing statistics...")
+    print("4. Computing statistics...")
     stats = comparator.get_all_stats()
     for session_id, stat in stats.items():
-        logger.info("   %s, session_id)
-        logger.info("      Mean ICI, stat.mean_ici)
-        logger.info("      Mean Phi, stat.mean_phi)
-    logger.info("   [OK] Statistics computed")
-    logger.info(str())
+        print(f"   {session_id}:")
+        print(f"      Mean ICI: {stat.mean_ici:.3f}")
+        print(f"      Mean Phi: {stat.mean_phi:.3f}")
+    print("   [OK] Statistics computed")
+    print()
 
     # Compare sessions
-    logger.info("5. Comparing sessions...")
+    print("5. Comparing sessions...")
     result = comparator.compare_sessions("session_a", "session_b")
     if result:
-        logger.info("   Delta ICI, result.delta_mean_ici)
-        logger.info("   ICI correlation, result.ici_correlation)
-        logger.info("   ICI t-test p-value, result.ici_ttest_pvalue)
+        print(f"   Delta ICI: {result.delta_mean_ici:.3f}")
+        print(f"   ICI correlation: {result.ici_correlation:.3f}")
+        print(f"   ICI t-test p-value: {result.ici_ttest_pvalue:.6f}")
 
         # Check if delta is correct (should be ~0.1)
         delta_ok = abs(result.delta_mean_ici - 0.1) < 0.05
-        logger.error("   [%s] Delta accuracy (expected ~0.1)", 'OK' if delta_ok else 'FAIL')
-    logger.info(str())
+        print(f"   [{'OK' if delta_ok else 'FAIL'}] Delta accuracy (expected ~0.1)")
+    print()
 
     # Memory usage
-    logger.info("6. Checking memory usage...")
+    print("6. Checking memory usage...")
     mem_usage = comparator.get_memory_usage()
-    logger.info("   Sessions, mem_usage['session_count'])
-    logger.info("   Total samples, mem_usage['total_samples'])
-    logger.info("   Estimated memory, mem_usage['estimated_mb'])
+    print(f"   Sessions: {mem_usage['session_count']}")
+    print(f"   Total samples: {mem_usage['total_samples']}")
+    print(f"   Estimated memory: {mem_usage['estimated_mb']:.2f} MB")
     mem_ok = mem_usage['estimated_mb'] < 1024  # < 1 GB
-    logger.error("   [%s] Memory usage (SC-001)", 'OK' if mem_ok else 'FAIL')
-    logger.info(str())
+    print(f"   [{'OK' if mem_ok else 'FAIL'}] Memory usage (SC-001: < 1 GB)")
+    print()
 
-    logger.info("=" * 60)
-    logger.info("Self-Test PASSED")
-    logger.info("=" * 60)
+    print("=" * 60)
+    print("Self-Test PASSED")
+    print("=" * 60)
 
     return True
 
 
-if __name__ == "__main__")
-
-"""  # auto-closed missing docstring
+if __name__ == "__main__":
+    _self_test()

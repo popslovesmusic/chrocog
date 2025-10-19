@@ -1,315 +1,385 @@
-# ==========================================================
-# chromatic_field_processor_fixed.py  (Section 1/4)
-# ==========================================================
-# Purpose, formatting, and logger safety
-# ==========================================================
+"""
+ChromaticFieldProcessor - Python wrapper around D-ASE AnalogCellularEngineAVX2
 
+Provides:
+- 8×8 channel (64 oscillator) real-time audio processing
+- Φ-modulated multi-channel output
+- Comprehensive metrics calculation (ICI, Phase Coherence, Spectral Centroid, Consciousness Level)
+- Low-latency block processing (target: <6ms)
+"""
+
+import sys
+import os
 import numpy as np
-import asyncio
+from scipy import signal
+from typing import Dict, Optional, Tuple
 import time
-import logging
-from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from .ici_engine import IntegratedChromaticInformation, ICIConfig
 
-logger = logging.getLogger(__name__)
+# Add sase amp fixed to path to import dase_engine
+DASE_PATH = os.path.join(os.path.dirname(__file__), '..', 'sase amp fixed')
+if DASE_PATH not in sys.path:
+    sys.path.insert(0, DASE_PATH)
+
+try:
+    import dase_engine
+    DASE_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: D-ASE engine not available: {e}")
+    print(f"Build with: cd '{DASE_PATH}' && python setup.py build_ext --inplace")
+    DASE_AVAILABLE = False
 
 
 class ChromaticFieldProcessor:
-        num_channels,
-        sample_rate,
-        fft_size,
-        overlap,
-        gain,
-        chromatic_weight,
-        enable_phi_sync,
-    ) :
+    """
+    Wrapper around D-ASE AnalogCellularEngineAVX2 for chromatic field processing
+
+    Implements 8×8 channel configuration (64 total nodes) with Φ-modulation support
+    """
+
+    PHI = 1.618033988749895  # Golden ratio
+    PHI_INV = 0.618033988749895  # 1/Φ
+
+    def __init__(self, num_channels: int = 8, sample_rate: int = 48000, block_size: int = 512):
+        """
+        Initialize ChromaticFieldProcessor
+
+        Args:
+            num_channels: Number of channels per dimension (8 = 64 total nodes)
+            sample_rate: Audio sample rate in Hz (48000 for spec compliance)
+            block_size: Processing block size in samples (512 for spec compliance)
+        """
         self.num_channels = num_channels
+        self.num_nodes = num_channels * num_channels  # 8×8 = 64
         self.sample_rate = sample_rate
-        self.fft_size = fft_size
-        self.overlap = overlap
-        self.gain = gain
-        self.chromatic_weight = chromatic_weight
-        self.enable_phi_sync = enable_phi_sync
+        self.block_size = block_size
 
-        self.last_frame_time: Optional[float] = None
-        self.phi_sync_state, Any] = {
-            "phase",
-            "last_update"),
-            "enabled",
-        
+        # Initialize D-ASE engine
+        if not DASE_AVAILABLE:
+            raise RuntimeError("D-ASE engine not available. Cannot initialize processor.")
+
+        self.engine = dase_engine.AnalogCellularEngine(self.num_nodes)
+        print(f"[ChromaticFieldProcessor] Initialized with {self.num_nodes} nodes @ {sample_rate}Hz")
+
+        # Check CPU features
+        has_avx2 = dase_engine.CPUFeatures.has_avx2()
+        has_fma = dase_engine.CPUFeatures.has_fma()
+        print(f"[ChromaticFieldProcessor] CPU Features: AVX2={has_avx2}, FMA={has_fma}")
+
+        # Metrics storage
+        self.last_metrics = {
+            'ici': 0.0,
+            'phase_coherence': 0.0,
+            'spectral_centroid': 0.0,
+            'consciousness_level': 0.0
         }
-                # ----------------------------------------
-        # Auto-Φ learner defaults (prevents AttributeError)
-        # ----------------------------------------
-        self.auto_phi_enabled = False
-        self._last_metrics = {"valid": False}
 
+        # Performance tracking
+        self.process_time_history = []
+        self.max_history_length = 100
 
-        # Buffers
-        self.input_buffer: List[np.ndarray] = []
-        self.output_buffer: List[np.ndarray] = []
+        # Multi-channel output buffer [channels, samples]
+        self.output_buffer = np.zeros((self.num_channels, self.block_size), dtype=np.float32)
 
-        # Diagnostic and metrics tracking
-        self.block_count = 0
-        self.avg_process_time = 0.0
-        self.latency_ms = 0.0
-        self.max_latency_ms = 0.0
-        self.last_fft: Optional[np.ndarray] = None
-        self.last_ifft, rate=%dHz, FFT=%d",
-            num_channels,
-            sample_rate,
-            fft_size,
+        # Initialize ICI Engine (Feature 014)
+        ici_config = ICIConfig(
+            num_channels=self.num_channels,
+            fft_size=self.block_size,
+            smoothing_alpha=0.2,
+            use_rfft=True,
+            output_matrix=False,
+            enable_logging=False
+        )
+        self.ici_engine = IntegratedChromaticInformation(ici_config)
 
-    # ==========================================================
-    # Core Processing Pipeline
-    # ==========================================================
-
-    def process_block(self, input_block) :
-            if input_block.ndim == 1, axis=0)
-
-            # Apply gain normalization
-            block = np.clip(input_block * self.gain, -1.0, 1.0)
-
-            # FFT transform
-            spectrum = np.fft.rfft(block, n=self.fft_size)
-            magnitude = np.abs(spectrum)
-            phase = np.angle(spectrum)
-
-            # Apply chromatic weighting
-            weighted_magnitude = magnitude * self.chromatic_weight
-
-            # Reconstruct signal
-            processed = np.fft.irfft(weighted_magnitude * np.exp(1j * phase), n=self.fft_size)
-            processed = processed[:, )
-
-            # Track performance
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-            self.block_count += 1
-            self.avg_process_time = (
-                (self.avg_process_time * (self.block_count - 1)) + elapsed_ms
-            ) / self.block_count
-            self.max_latency_ms = max(self.max_latency_ms, elapsed_ms)
-
-            logger.info(f"   ✓ Block processed in {elapsed_ms)
-
-            return processed
-
-        except Exception as e:
-            logger.exception("Error processing block, e)
-            return np.zeros_like(input_block)
-
-
-
-
-
-
-
-# ======================== END OF SECTION 1 ========================
-# (Next, async metrics, and smoothing)
-# Paste below this divider when ready
-# ==========================================================
-# chromatic_field_processor_fixed.py  (Section 2/4)
-# ==========================================================
-# Φ-Synchronization, async broadcast support, and safety checks
-# ==========================================================
-
-    async def update_phi_sync(self, delta_phase) :
-            state = {
-                "phase",
-                "avg_process_time_ms", 3),
-                "max_latency_ms", 3),
-                "block_count",
-            }
-            await websocket.send_json(state)
-            logger.debug("Broadcasted Φ-state → %s", state)
-        except Exception as e:
-            logger.error("WebSocket broadcast failed, e)
-
-    async def run_realtime_loop(
-        self,
-        input_stream,
-        websocket=None,
-        refresh_interval,
-    ) :
+    def processBlock(self,
+                     input_block: np.ndarray,
+                     phi_phase: float = 0.0,
+                     phi_depth: float = 0.5) -> np.ndarray:
         """
-        Primary async loop)
+        Process single audio block through D-ASE engine with Φ-modulation
+
+        Args:
+            input_block: float32[block_size] mono input signal
+            phi_phase: Φ-phase offset in radians [0, 2π]
+            phi_depth: Φ-modulation depth [0.0, 1.0]
+
+        Returns:
+            float32[num_channels, block_size] multi-channel output
+
+        Raises:
+            ValueError: If input_block shape is incorrect
+        """
+        start_time = time.perf_counter()
+
+        # Validate input
+        if input_block.shape[0] != self.block_size:
+            raise ValueError(f"Input block must be {self.block_size} samples, got {input_block.shape[0]}")
+
+        # Ensure float32
+        if input_block.dtype != np.float32:
+            input_block = input_block.astype(np.float32)
+
+        # Generate Φ-modulation envelope
+        modulation = self._generatePhiModulation(phi_phase, phi_depth)
+
+        # Process through each channel group (8 channels)
+        for ch_idx in range(self.num_channels):
+            # Calculate node range for this channel
+            node_start = ch_idx * self.num_channels
+            node_end = node_start + self.num_channels
+
+            # Process block through cellular engine for this channel group
+            # Apply Φ-rotated modulation for each channel
+            channel_phase_offset = ch_idx * self.PHI_INV * 2 * np.pi
+            channel_mod = np.roll(modulation, int(channel_phase_offset * self.block_size / (2*np.pi)))
+
+            # Process each sample in the block
+            for sample_idx in range(self.block_size):
+                # Input signal modulated by Φ-envelope
+                modulated_input = input_block[sample_idx] * channel_mod[sample_idx]
+
+                # Control signal varies with golden ratio
+                control_signal = np.cos(sample_idx * self.PHI_INV / self.block_size * 2 * np.pi)
+
+                # Process through D-ASE engine (simplified: using first node of group)
+                node_idx = node_start
+                if node_idx < len(self.engine.nodes):
+                    # Process through single representative node for this channel
+                    output_sample = self.engine.nodes[node_idx].process_signal_avx2(
+                        float(modulated_input),
+                        float(control_signal * phi_depth),
+                        0.0  # aux_signal
+                    )
+                    self.output_buffer[ch_idx, sample_idx] = output_sample
+                else:
+                    self.output_buffer[ch_idx, sample_idx] = 0.0
+
+        # Record processing time
+        elapsed = time.perf_counter() - start_time
+        self.process_time_history.append(elapsed)
+        if len(self.process_time_history) > self.max_history_length:
+            self.process_time_history.pop(0)
+
+        # Calculate metrics (lightweight version for real-time)
+        self._updateMetrics(self.output_buffer)
+
+        return self.output_buffer.copy()
+
+    def _generatePhiModulation(self, phi_phase: float, phi_depth: float) -> np.ndarray:
+        """
+        Generate Φ-modulated envelope for one block
+
+        Args:
+            phi_phase: Phase offset [0, 2π]
+            phi_depth: Modulation depth [0, 1]
+
+        Returns:
+            float32[block_size] modulation envelope
+        """
+        # Golden ratio modulation frequency
+        # f_mod = sample_rate / Φ ≈ 29,665 Hz for 48kHz
+        phi_freq = self.sample_rate * self.PHI_INV
+
+        # Generate time vector for this block
+        t = np.arange(self.block_size) / self.sample_rate
+
+        # Φ-modulated sinusoid
+        modulation = 1.0 + phi_depth * np.sin(2 * np.pi * phi_freq * t + phi_phase)
+
+        return modulation.astype(np.float32)
+
+    def _updateMetrics(self, output: np.ndarray):
+        """
+        Calculate and update metrics from multi-channel output
+
+        Metrics calculated:
+        - ICI (Inter-Channel Interference): Cross-correlation between channels
+        - Phase Coherence: Phase alignment across channels
+        - Spectral Centroid: Center of mass of spectrum
+        - Consciousness Level: Composite metric
+
+        Args:
+            output: float32[num_channels, block_size] multi-channel signal
+        """
         try:
-            async for block in input_stream)
-                smoothed = await self.smooth_transition(processed)
+            # ICI: Use full spectral-phase integration engine (Feature 014)
+            ici_value, _ = self.ici_engine.process_block(output)
+            self.last_metrics['ici'] = ici_value
 
-                if websocket)
+            # Phase Coherence: Using Hilbert transform
+            # (Simplified for real-time: just measure phase variance)
+            phases = []
+            for ch in range(self.num_channels):
+                # Extract instantaneous phase via analytic signal
+                analytic = signal.hilbert(output[ch])
+                phase = np.angle(analytic)
+                phases.append(np.mean(phase))
 
-                await self.update_phi_sync(delta_phase=np.mean(smoothed) * 0.01)
-                await asyncio.sleep(refresh_interval)
-        except asyncio.CancelledError)
+            phase_std = np.std(phases)
+            self.last_metrics['phase_coherence'] = max(0.0, 1.0 - phase_std / np.pi)
+
+            # Spectral Centroid: Weighted mean of frequencies
+            # Calculate for all channels combined
+            combined = np.mean(output, axis=0)
+            spectrum = np.abs(np.fft.rfft(combined))
+            freqs = np.fft.rfftfreq(self.block_size, 1.0 / self.sample_rate)
+
+            total_mag = np.sum(spectrum)
+            if total_mag > 0:
+                centroid = np.sum(spectrum * freqs) / total_mag
+            else:
+                centroid = 0.0
+            self.last_metrics['spectral_centroid'] = centroid
+
+            # Consciousness Level: Composite metric
+            # Balance of coherence (order), diversity (low ICI), and spectral richness
+            coherence_component = self.last_metrics['phase_coherence']
+            diversity_component = 1.0 - self.last_metrics['ici']
+            spectral_component = min(1.0, self.last_metrics['spectral_centroid'] / (self.sample_rate / 2))
+
+            consciousness = (
+                0.4 * coherence_component +
+                0.3 * diversity_component +
+                0.3 * spectral_component
+            )
+            self.last_metrics['consciousness_level'] = np.clip(consciousness, 0.0, 1.0)
+
         except Exception as e:
-            logger.exception("Runtime error in real-time loop, e)
-        finally)
+            print(f"[ChromaticFieldProcessor] Warning: Metrics calculation failed: {e}")
+            # Keep last known values
 
-
-
-
-
-
-
-# ======================== END OF SECTION 2 ========================
-# (Next, adaptive learning, and performance diagnostics)
-# Paste below this divider when ready
-# ==========================================================
-# chromatic_field_processor_fixed.py  (Section 3/4)
-# ==========================================================
-# Metrics (ICI, phase coherence, centroid, criticality, state)
-# + Small, isolated Auto-Φ learner (optional)
-# ==========================================================
-
-    # -----------------------------
-    # Utility: safe norms and helpers
-    # -----------------------------
-    @staticmethod
-    def _safe_norm(vec) :
-        if values.size == 0))
-
-    @staticmethod
-    def _phase_signs(frame) :
+    def getMetrics(self) -> Dict[str, float]:
         """
-        Compute per-block metrics from an [frames x channels] array.
-        - outputs, shape (N, C). If mono, treat as (N,1).
+        Get latest calculated metrics
+
+        Returns:
+            Dictionary with keys:
+                - ici: Inter-channel interference [0, 1]
+                - phase_coherence: Phase alignment [0, 1]
+                - spectral_centroid: Frequency in Hz
+                - consciousness_level: Composite metric [0, 1]
         """
-        if outputs is None:
-            return {"valid", "reason": "no_outputs"}
+        return self.last_metrics.copy()
 
-        if outputs.ndim == 1, 1)
+    def getPerformanceStats(self) -> Dict[str, float]:
+        """
+        Get processing performance statistics
 
-        n_frames, n_channels = outputs.shape
-        if n_frames == 0 or n_channels == 0:
-            return {"valid", "reason", "sample_rate", 48_000))
+        Returns:
+            Dictionary with:
+                - avg_process_time_ms: Average processing time
+                - max_process_time_ms: Maximum processing time
+                - min_process_time_ms: Minimum processing time
+                - avg_cpu_load: Estimated CPU load [0, 1]
+        """
+        if not self.process_time_history:
+            return {
+                'avg_process_time_ms': 0.0,
+                'max_process_time_ms': 0.0,
+                'min_process_time_ms': 0.0,
+                'avg_cpu_load': 0.0
+            }
 
-        # --- ICI (Integrated Chromatic Information) ---
-        # energy per channel (L2 norm), then pairwise normalized product
-        energies = np.sqrt(np.sum(outputs * outputs, axis=0))  # (C,)
-        mean_energy = float(np.mean(energies)) if energies.size else 0.0
-        ici_pairs = []
-        for i in range(n_channels), n_channels))
-                ici_pairs.append(num / den)
-        ici_raw = self._safe_mean(np.asarray(ici_pairs, dtype=np.float64))
-        # normalize ICI roughly to [0..1]
-        ici = float(np.clip(ici_raw / (mean_energy + 1e-6), 0.0, 1.0))
+        times_ms = [t * 1000 for t in self.process_time_history]
+        block_time_ms = (self.block_size / self.sample_rate) * 1000
 
-        # --- Phase coherence (adjacent channels sign correlation) ---
-        # sign proxy in time-domain
-        signs = self._phase_signs(outputs)  # (N, C)
-        if n_channels > 1):
-                a = signs[:, c].astype(np.float64)
-                b = signs[:, c + 1].astype(np.float64)
-                # cosine similarity of ±1 streams equals mean(a*b)
-                corr = float(np.mean(a * b))
-                # map from [-1..1] :
-            spectral_centroid_hz = 0.0
-        else) / mag_sum)
-        spectral_centroid_norm = float(np.clip(spectral_centroid_hz / (sr / 2.0), 0.0, 1.0))
-
-        # --- Chromatic energy (aggregate amplitude) ---
-        chromatic_energy = float(np.mean(np.abs(outputs)))
-
-        # --- Consciousness state classification ---
-        state = self._classify_state(
-            ici=ici,
-            coherence=phase_coherence,
-            centroid_hz=spectral_centroid_hz,
-
-        # --- Criticality (edge-of-chaos ~ ICI≈0.5) ---
-        criticality = float(1.0 - 2.0 * abs(ici - 0.5))
-        criticality = float(np.clip(criticality, 0.0, 1.0))
-
-        # --- Aggregate & cache ---
-        metrics = {
-            "ici",
-            "phase_coherence",
-            "spectral_centroid",
-            "spectral_centroid_norm",
-            "chromatic_energy",
-            "criticality",
-            "consciousness_state",
-            "valid",
-        }
-        self._last_metrics = metrics
-        logger.debug("Metrics → %s", metrics)
-        return metrics
-
-    # ----------------------------
-    # Simple state classifier
-    # ----------------------------
-    @staticmethod
-    def _classify_state(ici, coherence, centroid_hz) :
-        # thresholds mirror your spec’s intent; adjust freely
-        if ici < 0.1 and coherence < 0.2:
-            return "COMA"
-        if centroid_hz < 10.0 and coherence < 0.4:
-            return "SLEEP"
-        if ici < 0.3 and coherence < 0.5:
-            return "DROWSY"
-        if 0.3 <= ici <= 0.7 and coherence >= 0.4:
-            return "AWAKE"
-        if ici > 0.7 and coherence > 0.7:
-            return "ALERT"
-        if ici > 0.9 and coherence > 0.9, isolated, easy to disable)
-    # ==========================================================
-    def set_auto_phi_enabled(self, enabled) :
         return {
-            "avg_process_time_ms", 3),
-            "max_latency_ms", 3),
-            "block_count"),
+            'avg_process_time_ms': np.mean(times_ms),
+            'max_process_time_ms': np.max(times_ms),
+            'min_process_time_ms': np.min(times_ms),
+            'avg_cpu_load': np.mean(times_ms) / block_time_ms if block_time_ms > 0 else 0.0
         }
 
-    def get_last_metrics(self) :
-        """Return a snapshot combining performance and metrics."""
-        state = {
-            "performance"),
-            "metrics"),
-            "phi": {
-                "phase", 0.0)),
-                "depth", 0.0)),
-                "enabled", False)),
-            },
+    def reset(self):
+        """Reset all internal state and integrators"""
+        print("[ChromaticFieldProcessor] Resetting processor state")
+
+        # Reset D-ASE engine nodes
+        for node in self.engine.nodes:
+            node.reset_integrator()
+
+        # Reset metrics
+        self.last_metrics = {
+            'ici': 0.0,
+            'phase_coherence': 0.0,
+            'spectral_centroid': 0.0,
+            'consciousness_level': 0.0
         }
-        logger.debug("State summary → %s", state)
-        return state
 
-    # ------------------------------------------------------
-    # Validation / sanity self-test
-    # ------------------------------------------------------
-    def self_test(self) :
-        """
-        Runs a small offline test,
-        process through the pipeline, compute metrics, and verify stability.
-        """
-        logger.info("Running self-test sweep…")
+        # Clear performance history
+        self.process_time_history.clear()
 
-        # generate 1-second sine sweep
-        sr = self.sample_rate
-        t = np.linspace(0, 1.0, sr, endpoint=False)
-        sweep = np.sin(2 * np.pi * (220 * (t**2)))  # chirp-like
-        multi = np.stack([sweep * (i + 1) / self.num_channels for i in range(self.num_channels)])
+        # Clear output buffer
+        self.output_buffer.fill(0.0)
 
-        processed = self.process_block(multi)
-        metrics = self.compute_metrics(processed)
-        self.auto_phi_step(metrics)
-
-        summary = self.get_state_summary()
-        logger.info("Self-test complete.  ICI=%.3f  coherence=%.3f",
-                    metrics.get("ici", 0.0), metrics.get("phase_coherence", 0.0))
-        return summary
+    def __del__(self):
+        """Cleanup on destruction"""
+        print("[ChromaticFieldProcessor] Shutting down")
 
 
-# ==========================================================
-# Standalone module check
-# ==========================================================
-if __name__ == "__main__", format="%(levelname)s | %(message)s")
-    proc = ChromaticFieldProcessor()
-    result = proc.self_test()
-    print("\n=== Self-Test Summary ===")
-    for k, v in result.items():
-        print(f"{k})
-    print("=========================\n")
+# Self-test function
+def _self_test():
+    """Run basic self-test of ChromaticFieldProcessor"""
+    print("=" * 60)
+    print("ChromaticFieldProcessor Self-Test")
+    print("=" * 60)
 
-"""  # auto-closed missing docstring
+    if not DASE_AVAILABLE:
+        print("ERROR: D-ASE engine not available. Cannot run self-test.")
+        return False
+
+    try:
+        # Create processor
+        print("\n1. Initializing processor...")
+        processor = ChromaticFieldProcessor(num_channels=8, sample_rate=48000, block_size=512)
+        print("   ✓ Processor initialized")
+
+        # Generate test signal
+        print("\n2. Generating test signal (1kHz sine)...")
+        t = np.linspace(0, 512/48000, 512, endpoint=False)
+        test_signal = (np.sin(2 * np.pi * 1000 * t) * 0.5).astype(np.float32)
+        print(f"   ✓ Test signal generated: {test_signal.shape}")
+
+        # Process block
+        print("\n3. Processing test block...")
+        start = time.perf_counter()
+        output = processor.processBlock(test_signal, phi_phase=0.0, phi_depth=0.5)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        print(f"   ✓ Block processed in {elapsed_ms:.2f}ms")
+        print(f"   Output shape: {output.shape}")
+        print(f"   Output range: [{np.min(output):.3f}, {np.max(output):.3f}]")
+
+        # Check latency requirement
+        if elapsed_ms < 6.0:
+            print(f"   ✓ Latency OK ({elapsed_ms:.2f}ms < 6ms target)")
+        else:
+            print(f"   ⚠ Latency HIGH ({elapsed_ms:.2f}ms > 6ms target)")
+
+        # Get metrics
+        print("\n4. Checking metrics...")
+        metrics = processor.getMetrics()
+        for key, value in metrics.items():
+            print(f"   {key}: {value:.4f}")
+        print("   ✓ Metrics calculated")
+
+        # Performance stats
+        print("\n5. Performance statistics...")
+        perf = processor.getPerformanceStats()
+        for key, value in perf.items():
+            print(f"   {key}: {value:.4f}")
+
+        print("\n" + "=" * 60)
+        print("Self-Test PASSED ✓")
+        print("=" * 60)
+        return True
+
+    except Exception as e:
+        print(f"\n✗ Self-Test FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+if __name__ == "__main__":
+    _self_test()
