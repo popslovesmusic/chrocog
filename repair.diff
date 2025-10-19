@@ -1,0 +1,173 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/server/audio_server.py b/server/audio_server.py
+index 11ac991bcd9fe923bd801439046c728d6a3d19ff..3775579c53dda370bf5ab8accb477ad43bed30c6 100644
+--- a/server/audio_server.py
++++ b/server/audio_server.py
+@@ -247,62 +247,66 @@ class AudioServer:
+ 
+             self.callback_count += 1
+ 
+             # Warn if processing time exceeds threshold (80% of buffer duration)
+             if processing_time_ms > buffer_duration_ms * 0.8:
+                 print(f"[AudioServer] WARNING: High CPU load: {processing_time_ms:.2f} ms / {buffer_duration_ms:.2f} ms ({cpu_load*100:.1f}%)")
+ 
+         except Exception as e:
+             print(f"[AudioServer] ERROR in audio callback: {e}")
+             traceback.print_exc()
+             # Fill output with silence on error
+             outdata.fill(0)
+ 
+     def _create_metrics_frame(self, metrics_dict: Dict, phi_state, timestamp: float) -> MetricsFrame:
+         """
+         Create MetricsFrame from engine metrics and Φ state
+ 
+         Args:
+             metrics_dict: Metrics from ChromaticFieldProcessor
+             phi_state: Current PhiState
+             timestamp: Monotonic timestamp
+ 
+         Returns:
+             Complete MetricsFrame
+         """
+-        frame = MetricsFrame(
+-            timestamp=timestamp,
+-            ici=metrics_dict.get('ici', 0.0),
+-            phase_coherence=metrics_dict.get('phase_coherence', 0.0),
+-            spectral_centroid=metrics_dict.get('spectral_centroid', 0.0),
+-            criticality=metrics_dict.get('criticality', 0.0),
+-            consciousness_level=metrics_dict.get('consciousness_level', 0.0),
+-            state='IDLE',  # Will be classified by classify_state()
+-            phi_phase=phi_state.phase,
+-            phi_depth=phi_state.depth,
+-            phi_mode=phi_state.mode
+-        )
++        metrics_dict = metrics_dict or {}
++
++        frame = create_default_metrics_frame(timestamp=timestamp)
++
++        frame.ici = metrics_dict.get('ici', frame.ici)
++        frame.phase_coherence = metrics_dict.get('phase_coherence', frame.phase_coherence)
++        frame.spectral_centroid = metrics_dict.get('spectral_centroid', frame.spectral_centroid)
++        frame.criticality = metrics_dict.get('criticality', frame.criticality)
++        frame.consciousness_level = metrics_dict.get('consciousness_level', frame.consciousness_level)
++        frame.latency_ms = metrics_dict.get('latency_ms', frame.latency_ms)
++        frame.cpu_load = metrics_dict.get('cpu_load', frame.cpu_load)
++        frame.frame_id = metrics_dict.get('frame_id', frame.frame_id)
++
++        frame.phi_phase = getattr(phi_state, 'phase', frame.phi_phase)
++        frame.phi_depth = getattr(phi_state, 'depth', frame.phi_depth)
++        frame.phi_source = getattr(phi_state, 'source', frame.phi_source)
+ 
+         # Classify state based on metrics
+         frame.state = frame.classify_state()
+ 
+         return frame
+ 
+     def start(self, calibrate_latency: bool = False) -> bool:
+         """
+         Start audio server
+ 
+         Args:
+             calibrate_latency: Run latency calibration before starting
+ 
+         Returns:
+             True if started successfully
+         """
+         if self.is_running:
+             print("[AudioServer] Already running")
+             return True
+ 
+         print("\n[AudioServer] Starting audio server...")
+ 
+         # Optional latency calibration
+         if calibrate_latency:
+             print("\n[AudioServer] Running latency calibration...")
+diff --git a/server/metrics_frame.py b/server/metrics_frame.py
+index ab4748e7f78d45985de7586a058b9b499ccbe7e7..8321e462a9ef51dc4f033799f0f67ee58f7cee96 100644
+--- a/server/metrics_frame.py
++++ b/server/metrics_frame.py
+@@ -168,50 +168,81 @@ class MetricsFrame:
+             self.state = "CRITICAL"
+         elif c < 0.1:
+             self.state = "IDLE"
+         elif c > 0.6:
+             self.state = "AWAKE"
+         elif c < 0.3 and coh > 0.7:
+             self.state = "DEEP_SLEEP"
+         elif 0.3 <= c < 0.5 and coh < 0.5:
+             self.state = "DREAMING"
+         elif 0.4 <= c < 0.6 and crit > 0.7:
+             self.state = "REM"
+         else:
+             self.state = "TRANSITION"
+ 
+         return self.state
+ 
+     def __repr__(self) -> str:
+         return (
+             f"MetricsFrame(t={self.timestamp:.3f}, "
+             f"consciousness={self.consciousness_level:.2f}, "
+             f"state={self.state}, "
+             f"φ={self.phi_depth:.2f}@{self.phi_phase:.2f}rad)"
+         )
+ 
+ 
++def create_default_metrics_frame(
++    timestamp: Optional[float] = None,
++    overrides: Optional[Dict] = None
++) -> MetricsFrame:
++    """Create a default MetricsFrame with safe baseline values."""
++
++    frame = MetricsFrame(
++        timestamp=timestamp or time.time(),
++        ici=0.0,
++        phase_coherence=0.0,
++        spectral_centroid=0.0,
++        criticality=0.0,
++        consciousness_level=0.0,
++        state="IDLE",
++        phi_phase=0.0,
++        phi_depth=0.618,
++        phi_source="internal",
++        latency_ms=None,
++        cpu_load=None,
++        valid=True,
++        frame_id=None,
++    )
++
++    if overrides:
++        for key, value in overrides.items():
++            if hasattr(frame, key):
++                setattr(frame, key, value)
++
++    return frame
++
++
+ def create_idle_frame() -> MetricsFrame:
+     """
+     Create an idle/paused frame
+ 
+     Used when engine is not processing audio
+     """
+     return MetricsFrame(
+         timestamp=time.time(),
+         state="IDLE",
+         consciousness_level=0.0,
+         valid=True
+     )
+ 
+ 
+ def create_test_frame(frame_id: int = 0) -> MetricsFrame:
+     """
+     Create a test frame with synthetic data
+ 
+     Args:
+         frame_id: Sequential frame number
+ 
+     Returns:
+         Test MetricsFrame with valid synthetic metrics
+     """
+     import math
+ 
+EOF
+)

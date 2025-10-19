@@ -190,6 +190,37 @@ class MetricsFrame:
         )
 
 
+def create_default_metrics_frame(
+    timestamp: Optional[float] = None,
+    overrides: Optional[Dict] = None
+) -> MetricsFrame:
+    """Create a default MetricsFrame with safe baseline values."""
+
+    frame = MetricsFrame(
+        timestamp=timestamp or time.time(),
+        ici=0.0,
+        phase_coherence=0.0,
+        spectral_centroid=0.0,
+        criticality=0.0,
+        consciousness_level=0.0,
+        state="IDLE",
+        phi_phase=0.0,
+        phi_depth=0.618,
+        phi_source="internal",
+        latency_ms=None,
+        cpu_load=None,
+        valid=True,
+        frame_id=None,
+    )
+
+    if overrides:
+        for key, value in overrides.items():
+            if hasattr(frame, key):
+                setattr(frame, key, value)
+
+    return frame
+
+
 def create_idle_frame() -> MetricsFrame:
     """
     Create an idle/paused frame

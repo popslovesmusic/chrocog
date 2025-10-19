@@ -269,18 +269,22 @@ class AudioServer:
         Returns:
             Complete MetricsFrame
         """
-        frame = MetricsFrame(
-            timestamp=timestamp,
-            ici=metrics_dict.get('ici', 0.0),
-            phase_coherence=metrics_dict.get('phase_coherence', 0.0),
-            spectral_centroid=metrics_dict.get('spectral_centroid', 0.0),
-            criticality=metrics_dict.get('criticality', 0.0),
-            consciousness_level=metrics_dict.get('consciousness_level', 0.0),
-            state='IDLE',  # Will be classified by classify_state()
-            phi_phase=phi_state.phase,
-            phi_depth=phi_state.depth,
-            phi_mode=phi_state.mode
-        )
+        metrics_dict = metrics_dict or {}
+
+        frame = create_default_metrics_frame(timestamp=timestamp)
+
+        frame.ici = metrics_dict.get('ici', frame.ici)
+        frame.phase_coherence = metrics_dict.get('phase_coherence', frame.phase_coherence)
+        frame.spectral_centroid = metrics_dict.get('spectral_centroid', frame.spectral_centroid)
+        frame.criticality = metrics_dict.get('criticality', frame.criticality)
+        frame.consciousness_level = metrics_dict.get('consciousness_level', frame.consciousness_level)
+        frame.latency_ms = metrics_dict.get('latency_ms', frame.latency_ms)
+        frame.cpu_load = metrics_dict.get('cpu_load', frame.cpu_load)
+        frame.frame_id = metrics_dict.get('frame_id', frame.frame_id)
+
+        frame.phi_phase = getattr(phi_state, 'phase', frame.phi_phase)
+        frame.phi_depth = getattr(phi_state, 'depth', frame.phi_depth)
+        frame.phi_source = getattr(phi_state, 'source', frame.phi_source)
 
         # Classify state based on metrics
         frame.state = frame.classify_state()
