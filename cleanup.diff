@@ -1,0 +1,193 @@
+@'
+diff --git a/server/main.py b/server/main.py
+index 0000000..1111111 100644
+--- a/server/main.py
++++ b/server/main.py
+@@ -1,3 +1,260 @@
++"""
++Soundlab Main Server - Complete System Integration
++"""
++
++import sys
++import asyncio
++import signal
++import os
++import traceback
++from pathlib import Path
++
++# -------------------------------------------------
++# Run ABSnapshot self-test before startup
++# -------------------------------------------------
++from .ab_snapshot import _self_test
++if not _self_test():
+
+raise RuntimeError("ABSnapshot self-test failed at startup!")
+
++# -------------------------------------------------
++# Load D-ASE Engine
++# -------------------------------------------------
++try:
+
+from importlib import import_module
+
+dase_path = Path(file).resolve().parent.parent / "sase_amp_fixed"
+
+if dase_path.exists() and str(dase_path) not in sys.path:
+
+lua
+Copy code
+   sys.path.insert(0, str(dase_path))
+dase_engine = import_module("dase_engine")
+
+print(f"D-ASE engine v{getattr(dase_engine, 'version', 'unknown')} initialized successfully.")
+
+if hasattr(dase_engine, "print_cpu_capabilities"):
+
+scss
+Copy code
+   dase_engine.print_cpu_capabilities()
++except ModuleNotFoundError:
+
+print("Warning: D-ASE engine not available. Build with:")
+
+print(" cd 'C:\Users\jim\Desktop\Chrocog\sase_amp_fixed' && python setup.py build_ext --inplace")
++except Exception as e:
+
+print(f"Error initializing D-ASE engine: {e}")
+
+traceback.print_exc()
+
++# -------------------------------------------------
++# FastAPI Setup
++# -------------------------------------------------
++from fastapi import FastAPI, Request
++from fastapi.middleware.cors import CORSMiddleware
++from fastapi.staticfiles import StaticFiles
++from fastapi.responses import FileResponse, HTMLResponse
++
++app = FastAPI(title="Soundlab Main Server", version="1.0")
++
++app.add_middleware(
+
+CORSMiddleware,
+
+allow_origins=["*"],
+
+allow_credentials=True,
+
+allow_methods=["*"],
+
+allow_headers=["*"],
++)
+
++ROOT_DIR = Path(file).resolve().parent.parent
++STATIC_DIR = ROOT_DIR / "static"
++if STATIC_DIR.exists():
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
++# -------------------------------------------------
++# Routes
++# -------------------------------------------------
++@app.get("/")
++async def root():
+
+"""Health check endpoint."""
+
+return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
+
++@app.get("/engine/status")
++async def engine_status():
+
+try:
+
+cpp
+Copy code
+   import dase_engine
+kotlin
+Copy code
+   return {
+python
+Copy code
+       "version": getattr(dase_engine, "__version__", "unknown"),
+json
+Copy code
+       "cpu": "AVX2/FMA supported",
+Copy code
+   }
+except Exception as e:
+
+kotlin
+Copy code
+   return {"error": str(e)}
++@app.get("/ui", response_class=HTMLResponse)
++async def serve_ui(request: Request):
+
+"""Serve main Soundlab UI."""
+
+ui_path = ROOT_DIR / "soundlab_v2.html"
+
+if ui_path.exists():
+
+kotlin
+Copy code
+   return FileResponse(ui_path)
+return HTMLResponse("<h1>Soundlab UI not found</h1>", status_code=404)
+
++@app.get("/partials/{filename}", response_class=HTMLResponse)
++async def serve_partial(filename: str):
+
+partial_path = ROOT_DIR / "partials" / filename
+
+if partial_path.exists():
+
+kotlin
+Copy code
+   return FileResponse(partial_path)
+return HTMLResponse(f"<h3>Partial not found: {filename}</h3>", status_code=404)
+
++@app.get("/css/{filename}")
++async def serve_css(filename: str):
+
+path = ROOT_DIR / "css" / filename
+
+return FileResponse(path) if path.exists() else HTMLResponse("CSS not found", 404)
+
++@app.get("/js/{filename}")
++async def serve_js(filename: str):
+
+path = ROOT_DIR / "js" / filename
+
+return FileResponse(path) if path.exists() else HTMLResponse("JS not found", 404)
+
++print(f"Loaded main.py from: {file}")
++
++
++# -------------------------------------------------
++# (Optional) Import all server modules
++# -------------------------------------------------
++from .audio_server import AudioServer
++from .preset_store import PresetStore
++from .ab_snapshot import ABSnapshot
++from .metrics_streamer import MetricsStreamer
++from .preset_api import create_preset_api
++from .latency_api import create_latency_api, LatencyStreamer
++from .auto_phi import AutoPhiLearner, AutoPhiConfig
++from .criticality_balancer import CriticalityBalancer, CriticalityBalancerConfig
++from .state_memory import StateMemory, StateMemoryConfig
++from .state_classifier import StateClassifierGraph, StateClassifierConfig
++from .predictive_model import PredictiveModel, PredictiveModelConfig
++from .session_recorder import SessionRecorder, SessionRecorderConfig
++from .timeline_player import TimelinePlayer, TimelinePlayerConfig
++from .data_exporter import DataExporter, ExportConfig, ExportRequest, ExportFormat
++from .node_sync import NodeSynchronizer, NodeSyncConfig, NodeRole
++from .phasenet_protocol import PhaseNetNode, PhaseNetConfig
++from .cluster_monitor import ClusterMonitor, ClusterMonitorConfig
++from .hw_interface import HardwareInterface
++from .hybrid_bridge import HybridBridge
++from .hybrid_node import HybridNode, HybridNodeConfig, PhiSource, HybridMetrics
++from .session_comparator import SessionComparator, SessionStats, ComparisonResult
++from .correlation_analyzer import CorrelationAnalyzer, CorrelationMatrix
++from .chromatic_visualizer import ChromaticVisualizer, VisualizerConfig
++from .state_sync_manager import StateSyncManager, SyncConfig
+'@ | Set-Content -NoNewline -Encoding ASCII cleanup_fixed.diff

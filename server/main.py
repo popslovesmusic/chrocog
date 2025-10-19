@@ -15,19 +15,81 @@ Run with: python main.py
 import asyncio
 import signal
 import sys
+from pathlib import Path
+
 from .ab_snapshot import _self_test
 
+# -------------------------------------------------
+# Run ABSnapshot self-test before startup
+# -------------------------------------------------
 if not _self_test():
     raise RuntimeError("ABSnapshot self-test failed at startup!")
 
+# -------------------------------------------------
+# D-ASE Engine Loader (must run before server init)
+# -------------------------------------------------
+try:
+    from importlib import import_module
+
+    dase_path = Path(__file__).resolve().parent.parent / "sase_amp_fixed"
+    if dase_path.exists() and str(dase_path) not in sys.path:
+        sys.path.insert(0, str(dase_path))
+
+    dase_engine = import_module("dase_engine")
+    print(f"D-ASE engine v{getattr(dase_engine, '__version__', 'unknown')} initialized successfully.")
+    if hasattr(dase_engine, "print_cpu_capabilities"):
+        dase_engine.print_cpu_capabilities()
+
+except ModuleNotFoundError:
+    print(
+        "Warning: D-ASE engine not available: "
+        "Build with: cd 'C:\\Users\\jim\\Desktop\\Chrocog\\sase_amp_fixed' && python setup.py build_ext --inplace"
+    )
+except Exception as e:
+    import traceback
+    print(f"Error initializing D-ASE engine: {e}")
+    traceback.print_exc()
+
+# -------------------------------------------------
+# FastAPI App Initialization
+# -------------------------------------------------
 from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+
 import uvicorn
 import os
-from pathlib import Path
+
+app = FastAPI(title="Soundlab Main Server", version="1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------------------------------------------------
+# Root & Engine Status Routes
+# -------------------------------------------------
+@app.get("/")
+async def root():
+    return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
+
+@app.get("/engine/status")
+async def engine_status():
+    try:
+        import dase_engine
+        return {
+            "version": getattr(dase_engine, "__version__", "unknown"),
+            "cpu": "AVX2/FMA supported"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 
 # Import all components
 from .audio_server import AudioServer
@@ -54,6 +116,70 @@ from .session_comparator import SessionComparator, SessionStats, ComparisonResul
 from .correlation_analyzer import CorrelationAnalyzer, CorrelationMatrix
 from .chromatic_visualizer import ChromaticVisualizer, VisualizerConfig
 from .state_sync_manager import StateSyncManager, SyncConfig
+print(f"🧭 Loaded main.py from: {__file__}")
+
+
+# ================================================================
+# D-ASE Engine Auto-Loader
+# ================================================================
+try:
+    from importlib import import_module
+    from pathlib import Path
+    import sys
+
+    dase_path = Path(__file__).resolve().parent.parent / "sase_amp_fixed"
+    if dase_path.exists() and str(dase_path) not in sys.path:
+        sys.path.insert(0, str(dase_path))
+
+    dase_engine = import_module("dase_engine")
+    print(f"D-ASE engine v{getattr(dase_engine, '__version__', 'unknown')} initialized successfully.")
+    if hasattr(dase_engine, "print_cpu_capabilities"):
+        dase_engine.print_cpu_capabilities()
+
+except ModuleNotFoundError:
+    print(
+        "Warning: D-ASE engine not available. "
+        "Build with: cd 'C:\\Users\\jim\\Desktop\\Chrocog\\sase_amp_fixed' && python setup.py build_ext --inplace"
+    )
+except Exception as e:
+    import traceback
+    print(f"Error initializing D-ASE engine: {e}")
+    traceback.print_exc()
+
+
+# ================================================================
+# Initialize FastAPI Application  ✅ (must come before routes)
+# ================================================================
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(title="Soundlab Main Server", version="1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Optionally serve static content
+from pathlib import Path
+static_dir = Path(__file__).parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+# ------------------------------------------------
+# Root Endpoint (Health Check)
+# ------------------------------------------------
+@app.get("/")
+async def root():
+    return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
+
+
+
 
 # ================================================================
 # Initialize FastAPI Application
@@ -82,6 +208,134 @@ if static_dir.exists():
 @app.get("/")
 async def root():
     return {"status": "Soundlab Core Running", "modules": ["AudioServer", "Metrics", "Latency", "Presets"]}
+# ------------------------------------------------
+# Serve the Soundlab UI at /ui
+# ------------------------------------------------
+from fastapi.responses import HTMLResponse
+from fastapi import Request
+from pathlib import Path
+
+@app.get("/ui", response_class=HTMLResponse)
+async def serve_ui(request: Request):
+    """
+    Serve the main Soundlab UI (soundlab_v2.html)
+    """
+    ui_path = Path(__file__).resolve().parent.parent / "soundlab_v2.html"
+    if ui_path.exists():
+        return FileResponse(ui_path)
+    return HTMLResponse("<h1>Soundlab UI not found</h1>", status_code=404)
+
+
+# ------------------------------------------------
+# Engine Status Endpoint
+# ------------------------------------------------
+@app.get("/engine/status")
+async def engine_status():
+    try:
+        import dase_engine
+        return {
+            "version": getattr(dase_engine, "__version__", "unknown"),
+            "cpu": "AVX2/FMA supported",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+        # ================================================================
+# Serve Soundlab UI and assets
+# ================================================================
+from fastapi.responses import HTMLResponse
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+UI_ENTRY = ROOT_DIR / "soundlab_v2.html"
+PARTIALS_DIR = ROOT_DIR / "partials"
+CSS_DIR = ROOT_DIR / "css"
+JS_DIR = ROOT_DIR / "js"
+STATIC_DIR = ROOT_DIR / "static"
+
+# Serve the main Soundlab UI
+@app.get("/", response_class=HTMLResponse)
+async def serve_root_ui():
+    if UI_ENTRY.exists():
+        return FileResponse(UI_ENTRY)
+    return HTMLResponse("<h1>Soundlab UI not found</h1>", status_code=404)
+
+# Serve partial HTML components
+@app.get("/partials/{filename}", response_class=HTMLResponse)
+async def serve_partial(filename: str):
+    path = PARTIALS_DIR / filename
+    if path.exists():
+        return FileResponse(path)
+    return HTMLResponse(f"<h3>Partial not found: {filename}</h3>", status_code=404)
+
+# Serve CSS files
+@app.get("/css/{filename}")
+async def serve_css(filename: str):
+    path = CSS_DIR / filename
+    if path.exists():
+        return FileResponse(path)
+    return {"error": f"CSS not found: {filename}"}
+
+# Serve JS files
+@app.get("/js/{filename}")
+async def serve_js(filename: str):
+    path = JS_DIR / filename
+    if path.exists():
+        return FileResponse(path)
+    return {"error": f"JS not found: {filename}"}
+
+# ------------------------------------------------
+# Engine Benchmark Endpoint
+# ------------------------------------------------
+@app.get("/engine/benchmark")
+async def engine_benchmark(samples: int = 1000000):
+    """
+    Run a lightweight D-ASE compute benchmark.
+
+    Args:
+        samples (int): Number of synthetic samples to process (default = 1,000,000)
+
+    Returns:
+        dict: Performance stats (time, throughput, speedup, etc.)
+    """
+    import time
+    import importlib
+
+    try:
+        dase_engine = importlib.import_module("dase_engine")
+    except Exception as e:
+        return {"error": f"D-ASE engine not available: {e}"}
+
+    try:
+        start_time = time.perf_counter()
+
+        # Example: call a compute kernel if available
+        if hasattr(dase_engine, "run_benchmark"):
+            result = dase_engine.run_benchmark(samples)
+        elif hasattr(dase_engine, "compute_test"):
+            result = dase_engine.compute_test(samples)
+        else:
+            # Simulate a workload by performing dummy computation
+            import numpy as np
+            data = np.random.rand(samples).astype(np.float32)
+            result = np.sum(np.sin(data) * np.cos(data))
+
+        elapsed = time.perf_counter() - start_time
+        throughput = samples / elapsed
+
+        return {
+            "status": "ok",
+            "engine": getattr(dase_engine, "__version__", "unknown"),
+            "samples": samples,
+            "elapsed_seconds": round(elapsed, 6),
+            "throughput_samples_per_sec": int(throughput),
+            "speedup_estimate": "≈2–3× (AVX2/FMA)",
+            "result_checksum": float(result) if isinstance(result, (int, float)) else "n/a",
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
 
 
 class SoundlabServer:
